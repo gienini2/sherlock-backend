@@ -243,7 +243,8 @@ async def check_entities(payload: dict):
 
     # 3. Llamar matcher
     result = matcher_service.contrastar_entidades(entidades)
-
+    print("TEXTO RECIBIDO:", texto)
+    print("EXTRACTED:", raw_entities)
     return matches_to_dict(result["matches"])
 @app.post("/api/v1/enrich", response_model=EnrichResponse)
 async def enrich_report(request: EnrichRequest):
@@ -375,7 +376,22 @@ async def get_stats():
         "status": "ok",
         "message": "Estadísticas no implementadas aún"
     }
+raw_entities = extract_entities(texto)
+print("RAW ENTITIES:", raw_entities)
 
+entidades = {
+    "vehiculos": [
+        {"matricula": v, "marca": "", "modelo": ""}
+        for v in raw_entities.get("vehicles", [])
+    ],
+    "personas": [
+        {"dni": p["dni"], "nombre": "", "apellidos": ""}
+        for p in raw_entities.get("persons", [])
+    ],
+    "ubicaciones": []
+}
+
+print("FORMATO MATCHER:", entidades)
 
 # ============================================================================
 # MAIN
