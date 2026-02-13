@@ -1,6 +1,6 @@
 import re
 
-PLATE_REGEX = r'\b\d{4}\s*-?\s*[A-Z]{3}\b'
+PLATE_REGEX = r'\b\d{4}[^A-Z0-9]?[A-Z]{3}\b'
 DNI_REGEX = r'\b\d{8}[A-Z]\b'
 
 def extract_entities(text: str) -> dict:
@@ -34,3 +34,4 @@ def extract_entities(text: str) -> dict:
         "persons": [{"dni": dni} for dni in dnis],
         "locations": locations
     }
+
