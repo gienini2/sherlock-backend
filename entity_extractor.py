@@ -17,7 +17,7 @@ def extract_entities(text: str) -> dict:
     vehicles = []
 
     for plate in raw_plates:
-        clean_plate = re.sub(r'[\s\-]', '', plate)
+        clean_plate = re.sub(r'[^A-Z0-9]', '', plate)
         vehicles.append(clean_plate)
 
     # --- DNIs ---
@@ -34,4 +34,5 @@ def extract_entities(text: str) -> dict:
         "persons": [{"dni": dni} for dni in dnis],
         "locations": locations
     }
+
 
