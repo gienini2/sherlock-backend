@@ -23,10 +23,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import anthropic
-
+from matcher_service import MatcherService, matches_to_dict
+from annotator_service import AnnotatorService
 # Añadir paths para imports locales
-sys.path.append(str(Path(__file__).parent.parent / "matcher"))
-sys.path.append(str(Path(__file__).parent.parent / "annotator"))
+#sys.path.append(str(Path(__file__).parent.parent / "matcher"))
+#sys.path.append(str(Path(__file__).parent.parent / "annotator"))
 
 from matcher_service import MatcherService, matches_to_dict
 from annotator_service import AnnotatorService
@@ -47,8 +48,8 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 # Paths
-BASE_DIR = Path(__file__).parent.parent.parent
-PROMPTS_DIR = BASE_DIR / "prompts"
+BASE_DIR = Path(__file__).parent
+PROMPTS_DIR = BASE_DIR
 DB_PATH = os.getenv("SHERLOCK_DB_PATH", "/mnt/user-data/uploads/hermano_mayor.db")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
