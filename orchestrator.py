@@ -216,7 +216,35 @@ async def health_check():
         anthropic_ok=anthropic_ok
     )
 
+from entity_extractor import extract_entities
+from matcher_service import matches_to_dict
 
+@app.post("/api/v1/check-entities")
+async def check_entities(payload: dict):
+    texto = payload.get("texto", "").strip()
+    if not texto:
+        return {"vehicles": [], "persons": [], "locations": []}
+
+    # 1. Extraer entidades por regex
+    raw_entities = extract_entities(texto)
+
+    # 2. Adaptar formato al matcher
+    entidades = {
+        "vehiculos": [
+            {"matricula": v, "marca": "", "modelo": ""}
+            for v in raw_entities.get("vehicles", [])
+        ],
+        "personas": [
+            {"dni": p["dni"], "nombre": "", "apellidos": ""}
+            for p in raw_entities.get("persons", [])
+        ],
+        "ubicaciones": []
+    }
+
+    # 3. Llamar matcher
+    result = matcher_service.contrastar_entidades(entidades)
+
+    return matches_to_dict(result["matches"])
 @app.post("/api/v1/enrich", response_model=EnrichResponse)
 async def enrich_report(request: EnrichRequest):
     """
