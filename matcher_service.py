@@ -135,9 +135,13 @@ class MatcherService:
         self._validate_db()
     @property
     def db_adapter(self):
-           """Expone el adaptador de BD para el explainer"""
-          return self._db 
-                
+            """
+            Expone un adaptador de BD para uso del explainer.
+            Crea una instancia temporal de HermanoMayorDB.
+            """
+            from db_adapter import HermanoMayorDB
+            return HermanoMayorDB(self.db_path)
+        
     def _validate_db(self):
         """Validar que la BD existe y tiene el esquema esperado"""
         if not Path(self.db_path).exists():
@@ -157,15 +161,7 @@ class MatcherService:
                 logger.info(f"BD validada: {len(tables)} tablas encontradas")
         except sqlite3.Error as e:
             raise DatabaseError(f"Error validando BD: {e}")
-    @property
-    def db_adapter(self):
-            """
-            Expone un adaptador de BD para uso del explainer.
-            Crea una instancia temporal de HermanoMayorDB.
-            """
-            from db_adapter import HermanoMayorDB
-            return HermanoMayorDB(self.db_path)
-        
+   
     def contrastar_entidades(self, entidades: Dict) -> Dict:
         """
         Entrada principal del servicio.
