@@ -157,7 +157,15 @@ class MatcherService:
                 logger.info(f"BD validada: {len(tables)} tablas encontradas")
         except sqlite3.Error as e:
             raise DatabaseError(f"Error validando BD: {e}")
-    
+    @property
+    def db_adapter(self):
+            """
+            Expone un adaptador de BD para uso del explainer.
+            Crea una instancia temporal de HermanoMayorDB.
+            """
+            from db_adapter import HermanoMayorDB
+            return HermanoMayorDB(self.db_path)
+        
     def contrastar_entidades(self, entidades: Dict) -> Dict:
         """
         Entrada principal del servicio.
