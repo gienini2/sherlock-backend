@@ -219,16 +219,24 @@ async def health_check():
 from entity_extractor import extract_entities
 from matcher_service import matches_to_dict
 
+# BUSCAR esta sección en orchestrator.py (línea ~230):
+
 @app.post("/api/v1/check-entities")
 async def check_entities(payload: dict):
+    """
+    ENDPOINT LIGERO: Verificación rápida con regex
+    
+    Para análisis completo, usar /api/v1/enrich
+    """
     texto = payload.get("texto", "").strip()
     if not texto:
         return {"vehicles": [], "persons": [], "locations": []}
 
-    # 1. Extraer entidades por regex
-    raw_entities = extract_entities(texto)
+    # Extractor regex (rápido, sin Claude)
+    from entity_extractor import extract_entities_regex
+    raw_entities = extract_entities_regex(texto)
 
-    # 2. Adaptar formato al matcher
+    # Adaptar formato al matcher
     entidades = {
         "vehiculos": [
             {"matricula": v, "marca": "", "modelo": ""}
@@ -241,8 +249,61 @@ async def check_entities(payload: dict):
         "ubicaciones": []
     }
 
-    # 3. Llamar matcher
+    # Llamar matcher
     result = matcher_service.contrastar_entidades(entidades)
+    
+    return matches_to_dict(result["matches"])
+# AÑADIR DESPUÉS de /check-entities:
+
+@app.post("/api/v1/extract")
+async def extract_entities_endpoint(payload: dict):
+    """
+    EXTRACCIÓN COMPLETA con Claude + posiciones.
+    
+    Input:
+        {
+            "texto": "texto policial en formato DRAG"
+        }
+    
+    Output:
+        {
+            "vehiculos": [{matricula, marca, modelo, color, position}, ...],
+            "personas": [{nombre, apellidos, dni, rol, position}, ...],
+            "ubicaciones": [{tipo_via, nombre_via, numero, position}, ...]
+        }
+    """
+    if not anthropic_client:
+        raise HTTPException(
+            status_code=503,
+            detail="Servicio Claude no disponible"
+        )
+    
+    texto = payload.get("texto", "").strip()
+    if not texto:
+        raise HTTPException(
+            status_code=400,
+            detail="Campo 'texto' requerido"
+        )
+    
+    logger.info("[EXTRACT] Procesando solicitud de extracción")
+    
+    try:
+        from entity_extractor import extract_entities_claude
+        
+        entidades = await extract_entities_claude(texto, anthropic_client)
+        
+        logger.info("[EXTRACT] Extracción completada")
+        
+        return entidades
+        
+    except Exception as e:
+        logger.error(f"[EXTRACT] Error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error en extracción: {str(e)}"
+        )
+
+    
     print("TEXTO RECIBIDO:", texto)
     print("EXTRACTED:", raw_entities)
     return matches_to_dict(result["matches"])
@@ -285,10 +346,19 @@ async def enrich_report(request: EnrichRequest):
         
         logger.info(f"[REDACTOR] Completado - {len(texto_drag)} caracteres generados")
         
+  
         # ====================================================================
-        # PASO 2: EXTRACTOR (Claude)
+        # PASO 2: EXTRACTOR (Claude con posiciones)
         # ====================================================================
-        logger.info("[EXTRACTOR] Extrayendo entidades")
+        logger.info("[EXTRACTOR] Extrayendo entidades con Claude")
+        
+        from entity_extractor import extract_entities_claude
+        
+        entidades = await extract_entities_claude(texto_drag, anthropic_client)
+        
+        logger.info(f"[EXTRACTOR] Completado - {len(entidades.get('vehiculos', []))} vehículos, "
+                   f"{len(entidades.get('personas', []))} personas, "
+                   f"{len(entidades.get('ubicaciones', []))} ubicaciones")
         
         prompt_extractor = cargar_prompt("extractor_system.txt")
         entidades_json_raw = await llamar_claude(prompt_extractor, texto_drag, max_tokens=1500)
