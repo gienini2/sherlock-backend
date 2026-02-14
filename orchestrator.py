@@ -339,8 +339,8 @@ async def explain_matches(request: ExplainRequest):
     try:
         from db_explainer import generar_explicaciones
         
-        # Obtener DB adapter del matcher
-        db_adapter = matcher_service.db_adapter
+        # Obtener DB adapter del matcher (acceso directo al atributo privado)
+        db_adapter = matcher_service._db
         
         explicaciones = generar_explicaciones(matches, db_adapter)
         
