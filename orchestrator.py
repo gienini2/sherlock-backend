@@ -3,10 +3,11 @@ SHERLOCK ORCHESTRATOR - API de Orquestación
 ===========================================
 
 Coordina el flujo completo:
-1. REDACTOR (Claude) - texto vago → texto DRAG
-2. EXTRACTOR (Claude) - texto DRAG → entidades JSON
+1. REDACTOR (Claude) - texto vago → texto DRAG (en bitacola-backend)
+2. EXTRACTOR (Claude) - texto DRAG → entidades JSON con posiciones
 3. MATCHER - entidades → coincidencias BD
-4. ANNOTATOR - texto + coincidencias → texto enriquecido + explicación
+4. ANNOTATOR - texto + coincidencias → anotaciones JSON
+5. EXPLAINER - matches → explicaciones estructuradas
 
 FastAPI con async para máxima performance.
 """
@@ -25,12 +26,6 @@ from pydantic import BaseModel, Field
 import anthropic
 from matcher_service import MatcherService, matches_to_dict
 from annotator_service import AnnotatorService
-# Añadir paths para imports locales
-#sys.path.append(str(Path(__file__).parent.parent / "matcher"))
-#sys.path.append(str(Path(__file__).parent.parent / "annotator"))
-
-from matcher_service import MatcherService, matches_to_dict
-from annotator_service import AnnotatorService
 
 # Configuración de logging
 logging.basicConfig(
@@ -46,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Paths
 BASE_DIR = Path(__file__).parent
 PROMPTS_DIR = BASE_DIR
-DB_PATH = os.getenv("SHERLOCK_DB_PATH", "/mnt/user-data/uploads/hermano_mayor.db")
+DB_PATH = os.getenv("SHERLOCK_DB_PATH", str(BASE_DIR / "hermano_mayor.db"))
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 # Validar configuración
@@ -60,6 +55,21 @@ if not Path(DB_PATH).exists():
 # MODELOS PYDANTIC
 # ============================================================================
 
+class ExtractRequest(BaseModel):
+    """Request para extracción de entidades"""
+    texto: str = Field(..., description="Texto policial a analizar")
+
+
+class CheckEntitiesRequest(BaseModel):
+    """Request para check-entities (regex rápido)"""
+    texto: str = Field(..., description="Texto a verificar")
+
+
+class ExplainRequest(BaseModel):
+    """Request para explicaciones de DB"""
+    matches: Dict = Field(..., description="Matches del matcher")
+
+
 class EnrichRequest(BaseModel):
     """Request para enriquecer informe"""
     texto_vago: str = Field(..., description="Texto dictado por el agente")
@@ -71,9 +81,8 @@ class EnrichResponse(BaseModel):
     """Response con informe enriquecido"""
     texto_original: str
     texto_drag: str
-    texto_enriquecido: str
-    explicacion_db: str
-    metadata: Dict
+    anotaciones: list
+    matches: Dict
     processing_time_ms: int
 
 
@@ -92,13 +101,13 @@ class HealthResponse(BaseModel):
 app = FastAPI(
     title="SHERLOCK API",
     description="Sistema de enriquecimiento de informes policiales",
-    version="1.0.0"
+    version="2.0.0"
 )
 
-# CORS (ajustar según necesidades)
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción, especificar dominios
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -115,7 +124,7 @@ async def startup_event():
     """Inicializar servicios al arrancar"""
     global matcher_service, annotator_service, anthropic_client
     
-    logger.info("Iniciando SHERLOCK Orchestrator...")
+    logger.info("Iniciando SHERLOCK Orchestrator v2.0...")
     
     # Inicializar MATCHER
     try:
@@ -141,7 +150,7 @@ async def startup_event():
     else:
         logger.warning("✗ Cliente Anthropic NO inicializado (falta API key)")
     
-    logger.info("SHERLOCK Orchestrator iniciado correctamente")
+    logger.info("SHERLOCK Orchestrator v2.0 iniciado correctamente")
 
 
 # ============================================================================
@@ -154,74 +163,10 @@ def cargar_prompt(nombre_archivo: str) -> str:
     if not path.exists():
         raise FileNotFoundError(f"Prompt no encontrado: {path}")
     return path.read_text(encoding="utf-8")
-@app.post("/api/v1/explain")
-async def explain_matches(payload: dict):
-    """
-    Genera explicaciones estructuradas de matches.
-    
-    Input:
-        {
-            "matches": {...}  # Output del matcher
-        }
-    
-    Output:
-        {
-            "explicaciones": [
-                {
-                    "entity": "9915GBN",
-                    "tipo": "VEHICULO",
-                    "datos_actuales": {...},
-                    "historial": [...],
-                    "indicadores": {...}
-                },
-                ...
-            ]
-        }
-    """
-    if not matcher_service:
-        raise HTTPException(
-            status_code=503,
-            detail="Servicio MATCHER no disponible"
-        )
-    
-    matches = payload.get("matches", {})
-    
-    if not matches:
-        return {"explicaciones": []}
-    
-    logger.info("[EXPLAIN] Generando explicaciones")
-    
-    try:
-        from db_explainer import generar_explicaciones
-        
-        # Obtener DB adapter del matcher
-        db_adapter = matcher_service.db_adapter
-        
-        explicaciones = generar_explicaciones(matches, db_adapter)
-        
-        logger.info(f"[EXPLAIN] Generadas {len(explicaciones)} explicaciones")
-        
-        return {"explicaciones": explicaciones}
-        
-    except Exception as e:
-        logger.error(f"[EXPLAIN] Error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error generando explicaciones: {str(e)}"
-        )
+
 
 async def llamar_claude(system_prompt: str, user_message: str, max_tokens: int = 2000) -> str:
-    """
-    Llamar a Claude API de forma robusta.
-    
-    Args:
-        system_prompt: Prompt del sistema
-        user_message: Mensaje del usuario
-        max_tokens: Máximo de tokens a generar
-        
-    Returns:
-        Respuesta de Claude como string
-    """
+    """Llamar a Claude API de forma robusta"""
     if not anthropic_client:
         raise HTTPException(status_code=500, detail="Cliente Anthropic no inicializado")
     
@@ -270,21 +215,17 @@ async def health_check():
         anthropic_ok=anthropic_ok
     )
 
-from entity_extractor import extract_entities
-from matcher_service import matches_to_dict
-
-# BUSCAR esta sección en orchestrator.py (línea ~230):
 
 @app.post("/api/v1/check-entities")
-async def check_entities(payload: dict):
+async def check_entities(request: CheckEntitiesRequest):
     """
-    ENDPOINT LIGERO: Verificación rápida con regex
+    ENDPOINT LIGERO: Verificación rápida con regex (sin Claude).
     
-    Para análisis completo, usar /api/v1/enrich
+    Para análisis completo, usar /api/v1/extract o /api/v1/enrich
     """
-    texto = payload.get("texto", "").strip()
+    texto = request.texto.strip()
     if not texto:
-        return {"vehicles": [], "persons": [], "locations": []}
+        return {"vehiculos": [], "personas": [], "ubicaciones": []}
 
     # Extractor regex (rápido, sin Claude)
     from entity_extractor import extract_entities_regex
@@ -307,10 +248,10 @@ async def check_entities(payload: dict):
     result = matcher_service.contrastar_entidades(entidades)
     
     return matches_to_dict(result["matches"])
-# AÑADIR DESPUÉS de /check-entities:
+
 
 @app.post("/api/v1/extract")
-async def extract_entities_endpoint(payload: dict):
+async def extract_entities(request: ExtractRequest):
     """
     EXTRACCIÓN COMPLETA con Claude + posiciones.
     
@@ -332,7 +273,7 @@ async def extract_entities_endpoint(payload: dict):
             detail="Servicio Claude no disponible"
         )
     
-    texto = payload.get("texto", "").strip()
+    texto = request.texto.strip()
     if not texto:
         raise HTTPException(
             status_code=400,
@@ -357,21 +298,77 @@ async def extract_entities_endpoint(payload: dict):
             detail=f"Error en extracción: {str(e)}"
         )
 
+
+@app.post("/api/v1/explain")
+async def explain_matches(request: ExplainRequest):
+    """
+    Genera explicaciones estructuradas de matches.
     
-    print("TEXTO RECIBIDO:", texto)
-    print("EXTRACTED:", raw_entities)
-    return matches_to_dict(result["matches"])
+    Input:
+        {
+            "matches": {...}  # Output del matcher
+        }
+    
+    Output:
+        {
+            "explicaciones": [
+                {
+                    "entity": "9915GBN",
+                    "tipo": "VEHICULO",
+                    "datos_actuales": {...},
+                    "historial": [...],
+                    "indicadores": {...}
+                },
+                ...
+            ]
+        }
+    """
+    if not matcher_service:
+        raise HTTPException(
+            status_code=503,
+            detail="Servicio MATCHER no disponible"
+        )
+    
+    matches = request.matches
+    
+    if not matches:
+        return {"explicaciones": []}
+    
+    logger.info("[EXPLAIN] Generando explicaciones")
+    
+    try:
+        from db_explainer import generar_explicaciones
+        
+        # Obtener DB adapter del matcher
+        db_adapter = matcher_service.db_adapter
+        
+        explicaciones = generar_explicaciones(matches, db_adapter)
+        
+        logger.info(f"[EXPLAIN] Generadas {len(explicaciones)} explicaciones")
+        
+        return {"explicaciones": explicaciones}
+        
+    except Exception as e:
+        logger.error(f"[EXPLAIN] Error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generando explicaciones: {str(e)}"
+        )
+
+
 @app.post("/api/v1/enrich", response_model=EnrichResponse)
 async def enrich_report(request: EnrichRequest):
     """
-    Endpoint principal: enriquecer informe policial.
+    ENDPOINT COMPLETO: Enriquecimiento full de informe policial.
     
     Flujo:
-    1. Validar servicios
-    2. REDACTOR: texto vago → texto DRAG
-    3. EXTRACTOR: texto DRAG → entidades JSON
-    4. MATCHER: entidades → coincidencias BD
-    5. ANNOTATOR: texto + coincidencias → resultado enriquecido
+    1. REDACTOR: texto vago → texto DRAG (debe hacerse en bitacola-backend)
+    2. EXTRACTOR: texto DRAG → entidades JSON con posiciones
+    3. MATCHER: entidades → coincidencias BD
+    4. ANNOTATOR: texto + coincidencias → anotaciones JSON
+    
+    NOTA: Este endpoint espera recibir texto ya en formato DRAG.
+    La redacción debe hacerse previamente en bitacola-backend.
     """
     start_time = datetime.utcnow()
     
@@ -383,26 +380,15 @@ async def enrich_report(request: EnrichRequest):
     if not anthropic_client:
         raise HTTPException(status_code=503, detail="Servicio Claude no disponible")
     
-    texto_vago = request.texto_vago.strip()
-    if not texto_vago:
+    texto_drag = request.texto_vago.strip()
+    if not texto_drag:
         raise HTTPException(status_code=400, detail="texto_vago no puede estar vacío")
     
     logger.info(f"[ENRICH] Procesando solicitud - Agent ID: {request.agent_id}")
     
     try:
         # ====================================================================
-        # PASO 1: REDACTOR (Claude)
-        # ====================================================================
-        logger.info("[REDACTOR] Iniciando conversión a texto DRAG")
-        
-        prompt_redactor = cargar_prompt("redactor_system.txt")
-        texto_drag = await llamar_claude(prompt_redactor, texto_vago, max_tokens=2000)
-        
-        logger.info(f"[REDACTOR] Completado - {len(texto_drag)} caracteres generados")
-        
-  
-        # ====================================================================
-        # PASO 2: EXTRACTOR (Claude con posiciones)
+        # PASO 1: EXTRACTOR (Claude con posiciones)
         # ====================================================================
         logger.info("[EXTRACTOR] Extrayendo entidades con Claude")
         
@@ -414,33 +400,8 @@ async def enrich_report(request: EnrichRequest):
                    f"{len(entidades.get('personas', []))} personas, "
                    f"{len(entidades.get('ubicaciones', []))} ubicaciones")
         
-        prompt_extractor = cargar_prompt("extractor_system.txt")
-        entidades_json_raw = await llamar_claude(prompt_extractor, texto_drag, max_tokens=1500)
-        
-        # Limpiar posibles marcas de markdown
-        entidades_json_raw = entidades_json_raw.strip()
-        if entidades_json_raw.startswith("```json"):
-            entidades_json_raw = entidades_json_raw[7:]
-        if entidades_json_raw.startswith("```"):
-            entidades_json_raw = entidades_json_raw[3:]
-        if entidades_json_raw.endswith("```"):
-            entidades_json_raw = entidades_json_raw[:-3]
-        entidades_json_raw = entidades_json_raw.strip()
-        
-        # Parsear JSON
-        try:
-            entidades = json.loads(entidades_json_raw)
-        except json.JSONDecodeError as e:
-            logger.error(f"[EXTRACTOR] Error parseando JSON: {e}")
-            logger.error(f"[EXTRACTOR] JSON recibido: {entidades_json_raw[:500]}")
-            raise HTTPException(status_code=500, detail="Error parseando entidades extraídas")
-        
-        logger.info(f"[EXTRACTOR] Completado - {len(entidades.get('vehiculos', []))} vehículos, "
-                   f"{len(entidades.get('personas', []))} personas, "
-                   f"{len(entidades.get('ubicaciones', []))} ubicaciones")
-        
         # ====================================================================
-        # PASO 3: MATCHER (local determinista)
+        # PASO 2: MATCHER (local determinista)
         # ====================================================================
         logger.info("[MATCHER] Contrastando con base de datos")
         
@@ -453,13 +414,13 @@ async def enrich_report(request: EnrichRequest):
         logger.info(f"[MATCHER] Completado")
         
         # ====================================================================
-        # PASO 4: ANNOTATOR (local determinista)
+        # PASO 3: ANNOTATOR (local determinista)
         # ====================================================================
-        logger.info("[ANNOTATOR] Anotando texto")
+        logger.info("[ANNOTATOR] Generando anotaciones")
         
         resultado_anotacion = annotator_service.anotar_texto(texto_drag, matches_dict)
         
-        logger.info(f"[ANNOTATOR] Completado - {len(resultado_anotacion.metadata['warnings'])} warnings")
+        logger.info(f"[ANNOTATOR] Completado - {len(resultado_anotacion['anotaciones'])} anotaciones")
         
         # ====================================================================
         # RESPUESTA
@@ -468,16 +429,10 @@ async def enrich_report(request: EnrichRequest):
         processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
         response = EnrichResponse(
-            texto_original=texto_vago,
+            texto_original=texto_drag,
             texto_drag=texto_drag,
-            texto_enriquecido=resultado_anotacion.texto_enriquecido,
-            explicacion_db=resultado_anotacion.explicacion_db,
-            metadata={
-                **resultado_anotacion.metadata,
-                "agent_id": request.agent_id,
-                "session_id": request.session_id,
-                "timestamp": start_time.isoformat()
-            },
+            anotaciones=resultado_anotacion["anotaciones"],
+            matches=matches_dict,
             processing_time_ms=processing_time_ms
         )
         
@@ -495,27 +450,18 @@ async def enrich_report(request: EnrichRequest):
 @app.get("/api/v1/stats")
 async def get_stats():
     """Estadísticas básicas del servicio"""
-    # TODO: Implementar métricas reales (contador de requests, latencias, etc.)
     return {
         "status": "ok",
-        "message": "Estadísticas no implementadas aún"
+        "version": "2.0.0",
+        "endpoints": [
+            "/health",
+            "/api/v1/check-entities",
+            "/api/v1/extract",
+            "/api/v1/explain",
+            "/api/v1/enrich"
+        ]
     }
-raw_entities = extract_entities(texto)
-print("RAW ENTITIES:", raw_entities)
 
-entidades = {
-    "vehiculos": [
-        {"matricula": v, "marca": "", "modelo": ""}
-        for v in raw_entities.get("vehicles", [])
-    ],
-    "personas": [
-        {"dni": p["dni"], "nombre": "", "apellidos": ""}
-        for p in raw_entities.get("persons", [])
-    ],
-    "ubicaciones": []
-}
-
-print("FORMATO MATCHER:", entidades)
 
 # ============================================================================
 # MAIN
@@ -524,7 +470,6 @@ print("FORMATO MATCHER:", entidades)
 if __name__ == "__main__":
     import uvicorn
     
-    # Configuración para desarrollo
     uvicorn.run(
         "orchestrator:app",
         host="0.0.0.0",
