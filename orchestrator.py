@@ -154,7 +154,61 @@ def cargar_prompt(nombre_archivo: str) -> str:
     if not path.exists():
         raise FileNotFoundError(f"Prompt no encontrado: {path}")
     return path.read_text(encoding="utf-8")
-
+@app.post("/api/v1/explain")
+async def explain_matches(payload: dict):
+    """
+    Genera explicaciones estructuradas de matches.
+    
+    Input:
+        {
+            "matches": {...}  # Output del matcher
+        }
+    
+    Output:
+        {
+            "explicaciones": [
+                {
+                    "entity": "9915GBN",
+                    "tipo": "VEHICULO",
+                    "datos_actuales": {...},
+                    "historial": [...],
+                    "indicadores": {...}
+                },
+                ...
+            ]
+        }
+    """
+    if not matcher_service:
+        raise HTTPException(
+            status_code=503,
+            detail="Servicio MATCHER no disponible"
+        )
+    
+    matches = payload.get("matches", {})
+    
+    if not matches:
+        return {"explicaciones": []}
+    
+    logger.info("[EXPLAIN] Generando explicaciones")
+    
+    try:
+        from db_explainer import generar_explicaciones
+        
+        # Obtener DB adapter del matcher
+        db_adapter = matcher_service.db_adapter
+        
+        explicaciones = generar_explicaciones(matches, db_adapter)
+        
+        logger.info(f"[EXPLAIN] Generadas {len(explicaciones)} explicaciones")
+        
+        return {"explicaciones": explicaciones}
+        
+    except Exception as e:
+        logger.error(f"[EXPLAIN] Error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generando explicaciones: {str(e)}"
+        )
 
 async def llamar_claude(system_prompt: str, user_message: str, max_tokens: int = 2000) -> str:
     """
