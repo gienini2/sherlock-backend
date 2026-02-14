@@ -133,10 +133,10 @@ class MatcherService:
         """
         self.db_path = db_path
         self._validate_db()
-        @property
-            def db_adapter(self):
-                """Expone el adaptador de BD para el explainer"""
-                return self._db 
+    @property
+    def db_adapter(self):
+           """Expone el adaptador de BD para el explainer"""
+          return self._db 
                 
     def _validate_db(self):
         """Validar que la BD existe y tiene el esquema esperado"""
