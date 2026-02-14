@@ -25,30 +25,29 @@ class HermanoMayorDB:
         cur = self.conn.execute(
             "SELECT COUNT(*) as c FROM historial WHERE matricula = ?", (plate,)
         )
-
         return cur.fetchone()["c"]
-    def get_vehicle_history(self, plate: str) -> List[dict]:
-    """
-    Obtiene historial completo de un vehículo.
     
-    Returns:
-        Lista de registros ordenados por fecha DESC
-    """
-    cur = self.conn.execute(
+    def get_vehicle_history(self, plate: str) -> List[dict]:
         """
-        SELECT 
-            fecha,
-            tipo_actuacion,
-            agente_tip,
-            ubicacion
-        FROM historial
-        WHERE matricula = ?
-        ORDER BY fecha DESC
-        """,
-        (plate,)
-    )
-    return [dict(r) for r in cur.fetchall()]
-
+        Obtiene historial completo de un vehículo.
+        
+        Returns:
+            Lista de registros ordenados por fecha DESC
+        """
+        cur = self.conn.execute(
+            """
+            SELECT 
+                fecha,
+                tipo_actuacion,
+                agente_tip,
+                ubicacion
+            FROM historial
+            WHERE matricula = ?
+            ORDER BY fecha DESC
+            """,
+            (plate,)
+        )
+        return [dict(r) for r in cur.fetchall()]
 
     def get_person_history(self, dni: str) -> List[dict]:
         """
@@ -70,4 +69,4 @@ class HermanoMayorDB:
             """,
             (dni,)
         )
-    return [dict(r) for r in cur.fetchall()]
+        return [dict(r) for r in cur.fetchall()]
