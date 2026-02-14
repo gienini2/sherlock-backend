@@ -1,479 +1,298 @@
 """
-SHERLOCK ORCHESTRATOR - API de Orquestación
-===========================================
+SHERLOCK ENTITY EXTRACTOR - Extracción con Claude + Posiciones
+===============================================================
 
-Coordina el flujo completo:
-1. REDACTOR (Claude) - texto vago → texto DRAG (en bitacola-backend)
-2. EXTRACTOR (Claude) - texto DRAG → entidades JSON con posiciones
-3. MATCHER - entidades → coincidencias BD
-4. ANNOTATOR - texto + coincidencias → anotaciones JSON
-5. EXPLAINER - matches → explicaciones estructuradas
+Extrae entidades de texto policial usando Claude API.
+Añade posiciones exactas de texto para marcado semántico.
 
-FastAPI con async para máxima performance.
+IMPORTANTE: Este módulo es el ÚNICO punto de IA en el pipeline
+de análisis de Sherlock.
 """
 
-import os
-import sys
 import json
+import re
 import logging
+from typing import Dict, List, Optional
 from pathlib import Path
-from typing import Dict, Optional
-from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-import anthropic
-from matcher_service import MatcherService, matches_to_dict
-from annotator_service import AnnotatorService
-
-# Configuración de logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-)
 logger = logging.getLogger(__name__)
 
-# ============================================================================
-# CONFIGURACIÓN
-# ============================================================================
 
-# Paths
-BASE_DIR = Path(__file__).parent
-PROMPTS_DIR = BASE_DIR
-DB_PATH = os.getenv("SHERLOCK_DB_PATH", str(BASE_DIR / "hermano_mayor.db"))
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-
-# Validar configuración
-if not ANTHROPIC_API_KEY:
-    logger.warning("ANTHROPIC_API_KEY no configurada. El servicio no funcionará correctamente.")
-
-if not Path(DB_PATH).exists():
-    logger.error(f"Base de datos no encontrada: {DB_PATH}")
-
-# ============================================================================
-# MODELOS PYDANTIC
-# ============================================================================
-
-class ExtractRequest(BaseModel):
-    """Request para extracción de entidades"""
-    texto: str = Field(..., description="Texto policial a analizar")
-
-
-class CheckEntitiesRequest(BaseModel):
-    """Request para check-entities (regex rápido)"""
-    texto: str = Field(..., description="Texto a verificar")
-
-
-class ExplainRequest(BaseModel):
-    """Request para explicaciones de DB"""
-    matches: Dict = Field(..., description="Matches del matcher")
-
-
-class EnrichRequest(BaseModel):
-    """Request para enriquecer informe"""
-    texto_vago: str = Field(..., description="Texto dictado por el agente")
-    agent_id: Optional[int] = Field(None, description="ID del agente")
-    session_id: Optional[str] = Field(None, description="ID de sesión")
-
-
-class EnrichResponse(BaseModel):
-    """Response con informe enriquecido"""
-    texto_original: str
-    texto_drag: str
-    anotaciones: list
-    matches: Dict
-    processing_time_ms: int
-
-
-class HealthResponse(BaseModel):
-    """Health check response"""
-    status: str
-    timestamp: str
-    database_ok: bool
-    anthropic_ok: bool
-
-
-# ============================================================================
-# INICIALIZACIÓN DE SERVICIOS
-# ============================================================================
-
-app = FastAPI(
-    title="SHERLOCK API",
-    description="Sistema de enriquecimiento de informes policiales",
-    version="2.0.0"
-)
-
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Servicios globales
-matcher_service: Optional[MatcherService] = None
-annotator_service: Optional[AnnotatorService] = None
-anthropic_client: Optional[anthropic.Anthropic] = None
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Inicializar servicios al arrancar"""
-    global matcher_service, annotator_service, anthropic_client
-    
-    logger.info("Iniciando SHERLOCK Orchestrator v2.0...")
-    
-    # Inicializar MATCHER
-    try:
-        matcher_service = MatcherService(DB_PATH)
-        logger.info("✓ MATCHER inicializado")
-    except Exception as e:
-        logger.error(f"✗ Error inicializando MATCHER: {e}")
-    
-    # Inicializar ANNOTATOR
-    try:
-        annotator_service = AnnotatorService()
-        logger.info("✓ ANNOTATOR inicializado")
-    except Exception as e:
-        logger.error(f"✗ Error inicializando ANNOTATOR: {e}")
-    
-    # Inicializar Claude client
-    if ANTHROPIC_API_KEY:
-        try:
-            anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-            logger.info("✓ Cliente Anthropic inicializado")
-        except Exception as e:
-            logger.error(f"✗ Error inicializando Anthropic: {e}")
-    else:
-        logger.warning("✗ Cliente Anthropic NO inicializado (falta API key)")
-    
-    logger.info("SHERLOCK Orchestrator v2.0 iniciado correctamente")
-
-
-# ============================================================================
-# UTILIDADES
-# ============================================================================
-
-def cargar_prompt(nombre_archivo: str) -> str:
-    """Cargar prompt desde archivo"""
-    path = PROMPTS_DIR / nombre_archivo
+def cargar_prompt_extractor() -> str:
+    """Cargar prompt del sistema para extractor"""
+    path = Path(__file__).parent / "extractor_system.txt"
     if not path.exists():
         raise FileNotFoundError(f"Prompt no encontrado: {path}")
     return path.read_text(encoding="utf-8")
 
 
-async def llamar_claude(system_prompt: str, user_message: str, max_tokens: int = 2000) -> str:
-    """Llamar a Claude API de forma robusta"""
-    if not anthropic_client:
-        raise HTTPException(status_code=500, detail="Cliente Anthropic no inicializado")
+def normalizar_texto_busqueda(texto: str) -> str:
+    """
+    Normaliza texto para búsqueda case-insensitive.
+    Preserva el texto original para posiciones exactas.
+    """
+    return texto.upper().strip()
+
+
+def buscar_posicion_entidad(
+    texto_completo: str,
+    entidad_valor: str,
+    tipo: str
+) -> Optional[Dict]:
+    """
+    Busca la posición exacta de una entidad en el texto.
     
+    Args:
+        texto_completo: Texto original completo
+        entidad_valor: Valor de la entidad a buscar (ej: "9915GBN")
+        tipo: Tipo de entidad (vehiculo, persona, ubicacion)
+        
+    Returns:
+        Dict con start, end, texto_original o None si no se encuentra
+    """
+    # Normalizar para búsqueda
+    texto_upper = normalizar_texto_busqueda(texto_completo)
+    entidad_upper = normalizar_texto_busqueda(entidad_valor)
+    
+    # Buscar posición
+    pos = texto_upper.find(entidad_upper)
+    
+    if pos == -1:
+        logger.warning(f"No se encontró '{entidad_valor}' en el texto")
+        return None
+    
+    # Extraer texto original (respeta mayúsculas/minúsculas)
+    texto_original = texto_completo[pos:pos + len(entidad_valor)]
+    
+    return {
+        "start": pos,
+        "end": pos + len(entidad_valor),
+        "texto_original": texto_original
+    }
+
+
+def añadir_posiciones_vehiculos(
+    texto: str,
+    vehiculos: List[Dict]
+) -> List[Dict]:
+    """Añade posiciones de texto a vehículos"""
+    resultado = []
+    
+    for vehiculo in vehiculos:
+        matricula = vehiculo.get("matricula", "")
+        
+        if not matricula:
+            logger.warning("Vehículo sin matrícula, saltando")
+            continue
+        
+        # Buscar posición
+        posicion = buscar_posicion_entidad(texto, matricula, "vehiculo")
+        
+        # Añadir posición al objeto
+        vehiculo_con_posicion = {
+            **vehiculo,
+            "position": posicion
+        }
+        
+        resultado.append(vehiculo_con_posicion)
+    
+    return resultado
+
+
+def añadir_posiciones_personas(
+    texto: str,
+    personas: List[Dict]
+) -> List[Dict]:
+    """Añade posiciones de texto a personas"""
+    resultado = []
+    
+    for persona in personas:
+        # Buscar por DNI (más preciso)
+        dni = persona.get("dni", "")
+        
+        if dni:
+            posicion = buscar_posicion_entidad(texto, dni, "persona")
+        else:
+            # Fallback: buscar por nombre completo
+            nombre_completo = f"{persona.get('nombre', '')} {persona.get('apellidos', '')}".strip()
+            if nombre_completo:
+                posicion = buscar_posicion_entidad(texto, nombre_completo, "persona")
+            else:
+                posicion = None
+        
+        # Añadir posición
+        persona_con_posicion = {
+            **persona,
+            "position": posicion
+        }
+        
+        resultado.append(persona_con_posicion)
+    
+    return resultado
+
+
+def añadir_posiciones_ubicaciones(
+    texto: str,
+    ubicaciones: List[Dict]
+) -> List[Dict]:
+    """Añade posiciones de texto a ubicaciones"""
+    resultado = []
+    
+    for ubicacion in ubicaciones:
+        texto_completo = ubicacion.get("texto_completo", "")
+        
+        if not texto_completo:
+            logger.warning("Ubicación sin texto_completo, saltando")
+            continue
+        
+        posicion = buscar_posicion_entidad(texto, texto_completo, "ubicacion")
+        
+        ubicacion_con_posicion = {
+            **ubicacion,
+            "position": posicion
+        }
+        
+        resultado.append(ubicacion_con_posicion)
+    
+    return resultado
+
+
+async def extract_entities_claude(
+    texto: str,
+    anthropic_client
+) -> Dict:
+    """
+    Extrae entidades usando Claude API + añade posiciones.
+    
+    Este es el ÚNICO punto donde se usa IA en el análisis de Sherlock.
+    Todo lo demás (Matcher, Annotator, Explainer) es determinista.
+    
+    Args:
+        texto: Texto policial a analizar (formato DRAG)
+        anthropic_client: Cliente Anthropic inicializado
+        
+    Returns:
+        Dict con estructura:
+        {
+            "vehiculos": [{matricula, marca, modelo, color, position}, ...],
+            "personas": [{nombre, apellidos, dni, rol, position}, ...],
+            "ubicaciones": [{tipo_via, nombre_via, numero, texto_completo, position}, ...]
+        }
+    """
+    if not anthropic_client:
+        raise ValueError("Cliente Anthropic no inicializado")
+    
+    logger.info("[EXTRACTOR CLAUDE] Iniciando extracción de entidades")
+    
+    # 1. Cargar prompt del sistema
+    prompt_sistema = cargar_prompt_extractor()
+    
+    # 2. Llamar a Claude
     try:
         message = anthropic_client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=max_tokens,
-            system=system_prompt,
+            max_tokens=1500,
+            system=prompt_sistema,
             messages=[
-                {"role": "user", "content": user_message}
+                {"role": "user", "content": texto}
             ]
         )
         
-        # Extraer texto de la respuesta
+        # Extraer respuesta
         response_text = ""
         for block in message.content:
             if block.type == "text":
                 response_text += block.text
         
-        return response_text.strip()
+        response_text = response_text.strip()
         
-    except anthropic.APIError as e:
-        logger.error(f"Error en API de Anthropic: {e}")
-        raise HTTPException(status_code=502, detail=f"Error llamando a Claude: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error inesperado llamando a Claude: {e}")
-        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
-
-
-# ============================================================================
-# ENDPOINTS
-# ============================================================================
-
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Health check del servicio"""
-    database_ok = matcher_service is not None
-    anthropic_ok = anthropic_client is not None
-    
-    status = "ok" if (database_ok and anthropic_ok) else "degraded"
-    
-    return HealthResponse(
-        status=status,
-        timestamp=datetime.utcnow().isoformat(),
-        database_ok=database_ok,
-        anthropic_ok=anthropic_ok
-    )
-
-
-@app.post("/api/v1/check-entities")
-async def check_entities(request: CheckEntitiesRequest):
-    """
-    ENDPOINT LIGERO: Verificación rápida con regex (sin Claude).
-    
-    Para análisis completo, usar /api/v1/extract o /api/v1/enrich
-    """
-    texto = request.texto.strip()
-    if not texto:
-        return {"vehiculos": [], "personas": [], "ubicaciones": []}
-
-    # Extractor regex (rápido, sin Claude)
-    from entity_extractor import extract_entities_regex
-    raw_entities = extract_entities_regex(texto)
-
-    # Adaptar formato al matcher
-    entidades = {
-        "vehiculos": [
-            {"matricula": v, "marca": "", "modelo": ""}
-            for v in raw_entities.get("vehicles", [])
-        ],
-        "personas": [
-            {"dni": p["dni"], "nombre": "", "apellidos": ""}
-            for p in raw_entities.get("persons", [])
-        ],
-        "ubicaciones": []
-    }
-
-    # Llamar matcher
-    result = matcher_service.contrastar_entidades(entidades)
-    
-    return matches_to_dict(result["matches"])
-
-
-@app.post("/api/v1/extract")
-async def extract_entities(request: ExtractRequest):
-    """
-    EXTRACCIÓN COMPLETA con Claude + posiciones.
-    
-    Input:
-        {
-            "texto": "texto policial en formato DRAG"
-        }
-    
-    Output:
-        {
-            "vehiculos": [{matricula, marca, modelo, color, position}, ...],
-            "personas": [{nombre, apellidos, dni, rol, position}, ...],
-            "ubicaciones": [{tipo_via, nombre_via, numero, position}, ...]
-        }
-    """
-    if not anthropic_client:
-        raise HTTPException(
-            status_code=503,
-            detail="Servicio Claude no disponible"
-        )
-    
-    texto = request.texto.strip()
-    if not texto:
-        raise HTTPException(
-            status_code=400,
-            detail="Campo 'texto' requerido"
-        )
-    
-    logger.info("[EXTRACT] Procesando solicitud de extracción")
-    
-    try:
-        from entity_extractor import extract_entities_claude
-        
-        entidades = await extract_entities_claude(texto, anthropic_client)
-        
-        logger.info("[EXTRACT] Extracción completada")
-        
-        return entidades
+        logger.info(f"[EXTRACTOR CLAUDE] Respuesta recibida: {len(response_text)} chars")
         
     except Exception as e:
-        logger.error(f"[EXTRACT] Error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error en extracción: {str(e)}"
-        )
-
-
-@app.post("/api/v1/explain")
-async def explain_matches(request: ExplainRequest):
-    """
-    Genera explicaciones estructuradas de matches.
-    
-    Input:
-        {
-            "matches": {...}  # Output del matcher
-        }
-    
-    Output:
-        {
-            "explicaciones": [
-                {
-                    "entity": "9915GBN",
-                    "tipo": "VEHICULO",
-                    "datos_actuales": {...},
-                    "historial": [...],
-                    "indicadores": {...}
-                },
-                ...
-            ]
-        }
-    """
-    if not matcher_service:
-        raise HTTPException(
-            status_code=503,
-            detail="Servicio MATCHER no disponible"
-        )
-    
-    matches = request.matches
-    
-    if not matches:
-        return {"explicaciones": []}
-    
-    logger.info("[EXPLAIN] Generando explicaciones")
-    
-    try:
-        from db_explainer import generar_explicaciones
-        
-        # Obtener DB adapter del matcher
-        db_adapter = matcher_service.db_adapter
-        
-        explicaciones = generar_explicaciones(matches, db_adapter)
-        
-        logger.info(f"[EXPLAIN] Generadas {len(explicaciones)} explicaciones")
-        
-        return {"explicaciones": explicaciones}
-        
-    except Exception as e:
-        logger.error(f"[EXPLAIN] Error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error generando explicaciones: {str(e)}"
-        )
-
-
-@app.post("/api/v1/enrich", response_model=EnrichResponse)
-async def enrich_report(request: EnrichRequest):
-    """
-    ENDPOINT COMPLETO: Enriquecimiento full de informe policial.
-    
-    Flujo:
-    1. REDACTOR: texto vago → texto DRAG (debe hacerse en bitacola-backend)
-    2. EXTRACTOR: texto DRAG → entidades JSON con posiciones
-    3. MATCHER: entidades → coincidencias BD
-    4. ANNOTATOR: texto + coincidencias → anotaciones JSON
-    
-    NOTA: Este endpoint espera recibir texto ya en formato DRAG.
-    La redacción debe hacerse previamente en bitacola-backend.
-    """
-    start_time = datetime.utcnow()
-    
-    # Validaciones
-    if not matcher_service:
-        raise HTTPException(status_code=503, detail="Servicio MATCHER no disponible")
-    if not annotator_service:
-        raise HTTPException(status_code=503, detail="Servicio ANNOTATOR no disponible")
-    if not anthropic_client:
-        raise HTTPException(status_code=503, detail="Servicio Claude no disponible")
-    
-    texto_drag = request.texto_vago.strip()
-    if not texto_drag:
-        raise HTTPException(status_code=400, detail="texto_vago no puede estar vacío")
-    
-    logger.info(f"[ENRICH] Procesando solicitud - Agent ID: {request.agent_id}")
-    
-    try:
-        # ====================================================================
-        # PASO 1: EXTRACTOR (Claude con posiciones)
-        # ====================================================================
-        logger.info("[EXTRACTOR] Extrayendo entidades con Claude")
-        
-        from entity_extractor import extract_entities_claude
-        
-        entidades = await extract_entities_claude(texto_drag, anthropic_client)
-        
-        logger.info(f"[EXTRACTOR] Completado - {len(entidades.get('vehiculos', []))} vehículos, "
-                   f"{len(entidades.get('personas', []))} personas, "
-                   f"{len(entidades.get('ubicaciones', []))} ubicaciones")
-        
-        # ====================================================================
-        # PASO 2: MATCHER (local determinista)
-        # ====================================================================
-        logger.info("[MATCHER] Contrastando con base de datos")
-        
-        matches_result = matcher_service.contrastar_entidades(entidades)
-        matches = matches_result["matches"]
-        
-        # Convertir a dict para serialización
-        matches_dict = matches_to_dict(matches)
-        
-        logger.info(f"[MATCHER] Completado")
-        
-        # ====================================================================
-        # PASO 3: ANNOTATOR (local determinista)
-        # ====================================================================
-        logger.info("[ANNOTATOR] Generando anotaciones")
-        
-        resultado_anotacion = annotator_service.anotar_texto(texto_drag, matches_dict)
-        
-        logger.info(f"[ANNOTATOR] Completado - {len(resultado_anotacion['anotaciones'])} anotaciones")
-        
-        # ====================================================================
-        # RESPUESTA
-        # ====================================================================
-        end_time = datetime.utcnow()
-        processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
-        
-        response = EnrichResponse(
-            texto_original=texto_drag,
-            texto_drag=texto_drag,
-            anotaciones=resultado_anotacion["anotaciones"],
-            matches=matches_dict,
-            processing_time_ms=processing_time_ms
-        )
-        
-        logger.info(f"[ENRICH] Completado exitosamente en {processing_time_ms}ms")
-        
-        return response
-        
-    except HTTPException:
+        logger.error(f"[EXTRACTOR CLAUDE] Error llamando a Claude: {e}")
         raise
-    except Exception as e:
-        logger.error(f"[ENRICH] Error inesperado: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
-
-
-@app.get("/api/v1/stats")
-async def get_stats():
-    """Estadísticas básicas del servicio"""
-    return {
-        "status": "ok",
-        "version": "2.0.0",
-        "endpoints": [
-            "/health",
-            "/api/v1/check-entities",
-            "/api/v1/extract",
-            "/api/v1/explain",
-            "/api/v1/enrich"
-        ]
-    }
-
-
-# ============================================================================
-# MAIN
-# ============================================================================
-
-if __name__ == "__main__":
-    import uvicorn
     
-    uvicorn.run(
-        "orchestrator:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+    # 3. Limpiar markdown si existe
+    if response_text.startswith("```json"):
+        response_text = response_text[7:]
+    if response_text.startswith("```"):
+        response_text = response_text[3:]
+    if response_text.endswith("```"):
+        response_text = response_text[:-3]
+    
+    response_text = response_text.strip()
+    
+    # 4. Parsear JSON
+    try:
+        entidades_raw = json.loads(response_text)
+    except json.JSONDecodeError as e:
+        logger.error(f"[EXTRACTOR CLAUDE] Error parseando JSON: {e}")
+        logger.error(f"[EXTRACTOR CLAUDE] JSON recibido: {response_text[:500]}")
+        raise
+    
+    # 5. Añadir posiciones de texto
+    vehiculos = entidades_raw.get("vehiculos", [])
+    personas = entidades_raw.get("personas", [])
+    ubicaciones = entidades_raw.get("ubicaciones", [])
+    
+    vehiculos_con_pos = añadir_posiciones_vehiculos(texto, vehiculos)
+    personas_con_pos = añadir_posiciones_personas(texto, personas)
+    ubicaciones_con_pos = añadir_posiciones_ubicaciones(texto, ubicaciones)
+    
+    # 6. Resultado final
+    resultado = {
+        "vehiculos": vehiculos_con_pos,
+        "personas": personas_con_pos,
+        "ubicaciones": ubicaciones_con_pos
+    }
+    
+    logger.info(f"[EXTRACTOR CLAUDE] Completado - "
+                f"{len(vehiculos_con_pos)} vehículos, "
+                f"{len(personas_con_pos)} personas, "
+                f"{len(ubicaciones_con_pos)} ubicaciones")
+    
+    return resultado
+
+
+# ============================================================================
+# EXTRACTOR REGEX (FALLBACK - para /check-entities ligero)
+# ============================================================================
+
+PLATE_REGEX = r'\b\d{4}[^A-Z0-9]?[A-Z]{3}\b'
+DNI_REGEX = r'\b\d{8}[A-Z]\b'
+
+
+def extract_entities_regex(text: str) -> Dict:
+    """
+    Extractor básico por regex (SIN Claude).
+    
+    USAR SOLO para:
+    - Endpoint /check-entities (verificación rápida)
+    - Fallback si Claude falla
+    
+    NO añade posiciones de texto.
+    """
+    text_upper = text.upper()
+    
+    # Matrículas
+    raw_plates = re.findall(PLATE_REGEX, text_upper)
+    vehicles = []
+    
+    for plate in raw_plates:
+        clean_plate = re.sub(r'[^A-Z0-9]', '', plate)
+        vehicles.append(clean_plate)
+    
+    # DNIs
+    dnis = re.findall(DNI_REGEX, text_upper)
+    
+    # Ubicaciones (básico)
+    locations = []
+    for line in text.splitlines():
+        if any(x in line.lower() for x in ["carrer", "carretera", "avinguda", "plaça"]):
+            locations.append(line.strip())
+    
+    return {
+        "vehicles": list(set(vehicles)),
+        "persons": [{"dni": dni} for dni in dnis],
+        "locations": locations
+    }
