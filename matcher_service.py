@@ -125,22 +125,22 @@ class MatcherService:
     Servicio de contraste determinista.
     Responsabilidad única: consultar BD y calcular similitudes.
     """
-    
     def __init__(self, db_path: str):
-        """
-        Args:
-            db_path: Ruta a hermano_mayor.db
-        """
+    """
+    Args:
+        db_path: Ruta a hermano_mayor.db
+    """
         self.db_path = db_path
         self._validate_db()
+    
+        # Crear instancia de DB adapter para explainer
+        from db_adapter import HermanoMayorDB
+        self._db = HermanoMayorDB(db_path)
+
     @property
     def db_adapter(self):
-            """
-            Expone un adaptador de BD para uso del explainer.
-            Crea una instancia temporal de HermanoMayorDB.
-            """
-            from db_adapter import HermanoMayorDB
-            return HermanoMayorDB(self.db_path)
+        """Expone adaptador BD para explainer"""
+        return self._db    
         
     def _validate_db(self):
         """Validar que la BD existe y tiene el esquema esperado"""
