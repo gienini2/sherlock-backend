@@ -12,7 +12,7 @@ de análisis de Sherlock.
 import json
 import re
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -227,4 +227,72 @@ async def extract_entities_claude(
         entidades_raw = json.loads(response_text)
     except json.JSONDecodeError as e:
         logger.error(f"[EXTRACTOR CLAUDE] Error parseando JSON: {e}")
-        logger
+        logger.error(f"[EXTRACTOR CLAUDE] JSON recibido: {response_text[:500]}")
+        raise
+    
+    # 5. Añadir posiciones de texto
+    vehiculos = entidades_raw.get("vehiculos", [])
+    personas = entidades_raw.get("personas", [])
+    ubicaciones = entidades_raw.get("ubicaciones", [])
+    
+    vehiculos_con_pos = añadir_posiciones_vehiculos(texto, vehiculos)
+    personas_con_pos = añadir_posiciones_personas(texto, personas)
+    ubicaciones_con_pos = añadir_posiciones_ubicaciones(texto, ubicaciones)
+    
+    # 6. Resultado final
+    resultado = {
+        "vehiculos": vehiculos_con_pos,
+        "personas": personas_con_pos,
+        "ubicaciones": ubicaciones_con_pos
+    }
+    
+    logger.info(f"[EXTRACTOR CLAUDE] Completado - "
+                f"{len(vehiculos_con_pos)} vehículos, "
+                f"{len(personas_con_pos)} personas, "
+                f"{len(ubicaciones_con_pos)} ubicaciones")
+    
+    return resultado
+
+
+# ============================================================================
+# EXTRACTOR REGEX (FALLBACK - para /check-entities ligero)
+# ============================================================================
+
+PLATE_REGEX = r'\b\d{4}[^A-Z0-9]?[A-Z]{3}\b'
+DNI_REGEX = r'\b\d{8}[A-Z]\b'
+
+
+def extract_entities_regex(text: str) -> Dict:
+    """
+    Extractor básico por regex (SIN Claude).
+    
+    USAR SOLO para:
+    - Endpoint /check-entities (verificación rápida)
+    - Fallback si Claude falla
+    
+    NO añade posiciones de texto.
+    """
+    text_upper = text.upper()
+    
+    # Matrículas
+    raw_plates = re.findall(PLATE_REGEX, text_upper)
+    vehicles = []
+    
+    for plate in raw_plates:
+        clean_plate = re.sub(r'[^A-Z0-9]', '', plate)
+        vehicles.append(clean_plate)
+    
+    # DNIs
+    dnis = re.findall(DNI_REGEX, text_upper)
+    
+    # Ubicaciones (básico)
+    locations = []
+    for line in text.splitlines():
+        if any(x in line.lower() for x in ["carrer", "carretera", "avinguda", "plaça"]):
+            locations.append(line.strip())
+    
+    return {
+        "vehicles": list(set(vehicles)),
+        "persons": [{"dni": dni} for dni in dnis],
+        "locations": locations
+    }
