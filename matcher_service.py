@@ -125,21 +125,21 @@ class MatcherService:
     Servicio de contraste determinista.
     Responsabilidad única: consultar BD y calcular similitudes.
     """
-def __init__(self, db_path: str):
-    """
-    Args:
-        db_path: Ruta a hermano_mayor.db
-    """
-    self.db_path = db_path
-    self._validate_db()
-    
-    # Crear instancia de DB adapter para explainer
-    from db_adapter import HermanoMayorDB
-    self._db = HermanoMayorDB(db_path)
-    
-    # NUEVO: Inicializar token matcher
-    self.token_matcher = TokenMatcher()
-    logger.info("[MATCHER] Token matcher inicializado")
+    def __init__(self, db_path: str):
+        """
+        Args:
+            db_path: Ruta a hermano_mayor.db
+        """
+        self.db_path = db_path
+        self._validate_db()
+        
+        # Crear instancia de DB adapter para explainer
+        from db_adapter import HermanoMayorDB
+        self._db = HermanoMayorDB(db_path)
+        
+        # NUEVO: Inicializar token matcher
+        self.token_matcher = TokenMatcher()
+        logger.info("[MATCHER] Token matcher inicializado")
 
     
     @property
