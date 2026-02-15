@@ -51,7 +51,7 @@ def explicar_vehiculo(match: Dict, db_adapter) -> Dict:
     """
     entidad = match.get("entidad_original", {})
     matricula = entidad.get("matricula", "")
-    db_data = match.get("db_data", {})
+    db_data = match.get("db_record", {})
     
     # Datos actuales
     datos_actuales = {
@@ -112,8 +112,8 @@ def explicar_vehiculo(match: Dict, db_adapter) -> Dict:
 def explicar_persona(match: Dict, db_adapter) -> Dict:
     """Genera explicación estructurada de persona"""
     entidad = match.get("entidad_original", {})
-    dni = entidad.get("dni", "")
-    db_data = match.get("db_data", {})
+    db_data = match.get("db_record", {})
+    dni = db_data.get("dni", "")
     
     # Datos actuales
     datos_actuales = {
@@ -203,3 +203,4 @@ def generar_explicaciones(matches: Dict, db_adapter) -> List[Dict]:
     logger.info(f"[EXPLAINER] Generadas {len(explicaciones)} explicaciones")
     
     return explicaciones
+
