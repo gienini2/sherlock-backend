@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
+from token_matcher import TokenMatcher
 
 # Configuración de logging PRIMERO
 logging.basicConfig(
@@ -124,18 +125,22 @@ class MatcherService:
     Servicio de contraste determinista.
     Responsabilidad única: consultar BD y calcular similitudes.
     """
+def __init__(self, db_path: str):
+    """
+    Args:
+        db_path: Ruta a hermano_mayor.db
+    """
+    self.db_path = db_path
+    self._validate_db()
     
-    def __init__(self, db_path: str):
-        """
-        Args:
-            db_path: Ruta a hermano_mayor.db
-        """
-        self.db_path = db_path
-        self._validate_db()
-        
-        # Crear instancia de DB adapter para explainer
-        from db_adapter import HermanoMayorDB
-        self._db = HermanoMayorDB(db_path)
+    # Crear instancia de DB adapter para explainer
+    from db_adapter import HermanoMayorDB
+    self._db = HermanoMayorDB(db_path)
+    
+    # NUEVO: Inicializar token matcher
+    self.token_matcher = TokenMatcher()
+    logger.info("[MATCHER] Token matcher inicializado")
+
     
     @property
     def db_adapter(self):
@@ -432,13 +437,16 @@ class MatcherService:
             if exact_match:
                 return self._build_persona_match(persona, exact_match, "EXACTO", 1.0)
         
-        # 2. Búsqueda por nombre+apellidos (fuzzy)
+        # 2. Búsqueda por nombre+apellidos (fuzzy con tokens)
         if nombre or apellidos:
             fuzzy_matches = self._buscar_persona_by_nombre(nombre, apellidos)
             if fuzzy_matches:
                 best_match, confidence = fuzzy_matches[0]
-                if confidence >= 0.85:
-                    return self._build_persona_match(persona, best_match, "PARCIAL", confidence)
+                
+                # NUEVO UMBRAL: 70% en lugar de 85%
+                if confidence >= 0.70:  # ← CAMBIADO de 0.85 a 0.70
+                    match_type = "EXACTO" if confidence >= 0.95 else "PARCIAL"
+                    return self._build_persona_match(persona, best_match, match_type, confidence)
         
         # 3. Sin coincidencia
         return PersonaMatch(
@@ -448,7 +456,6 @@ class MatcherService:
             db_record=None,
             enrichment={}
         )
-    
     def _buscar_persona_by_dni(self, dni: str) -> Optional[Dict]:
         """Búsqueda exacta por DNI"""
         dni_norm = self._normalizar_dni(dni)
@@ -468,45 +475,40 @@ class MatcherService:
             return dict(row) if row else None
     
     def _buscar_persona_by_nombre(self, nombre: str, apellidos: str) -> List[Tuple[Dict, float]]:
-        """Búsqueda fuzzy por nombre y apellidos"""
+        """
+        Búsqueda fuzzy por nombre y apellidos usando TOKEN MATCHING.
+        
+        NUEVO: Usa TokenMatcher para mejor precisión con:
+        - Nombres compuestos (Maria Del Carmen)
+        - Apellidos parciales (Gangas vs Gangas Alvear)
+        - Orden flexible de tokens
+        """
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
+            # Traer TODOS los candidatos de la BD
+            # (En BD grande, añadir filtro LIKE para reducir dataset)
             cursor.execute("""
                 SELECT dni, nombre, apellidos, direccion, telefono,
                        fecha_nacimiento, sexo, observaciones
                 FROM persons
             """)
             
-            candidates = []
-            for row in cursor.fetchall():
-                person = dict(row)
-                
-                # Similitud de nombre
-                sim_nombre = 0.0
-                if nombre and person['nombre']:
-                    sim_nombre = fuzz.ratio(
-                        self._normalizar_texto(nombre),
-                        self._normalizar_texto(person['nombre'])
-                    ) / 100.0
-                
-                # Similitud de apellidos
-                sim_apellidos = 0.0
-                if apellidos and person['apellidos']:
-                    sim_apellidos = fuzz.ratio(
-                        self._normalizar_texto(apellidos),
-                        self._normalizar_texto(person['apellidos'])
-                    ) / 100.0
-                
-                # Confidence promedio (nombre 40%, apellidos 60%)
-                confidence = (sim_nombre * 0.4) + (sim_apellidos * 0.6)
-                
-                if confidence >= 0.7:
-                    candidates.append((person, confidence))
-            
-            candidates.sort(key=lambda x: x[1], reverse=True)
-            return candidates[:3]
+            # Convertir a lista de dicts
+            candidatos = [dict(row) for row in cursor.fetchall()]
+        
+        # Usar token matcher para búsqueda inteligente
+        resultados = self.token_matcher.buscar_persona_fuzzy_tokens(
+            nombre,
+            apellidos,
+            candidatos,
+            umbral=0.70  # Umbral más bajo que antes (antes era 0.85)
+        )
+        
+        # Convertir formato: (persona, confidence, detalles) -> (persona, confidence)
+        return [(persona, confidence) for persona, confidence, _ in resultados]
+
     
     def _build_persona_match(self, entidad: Dict, db_record: Dict, match_type: str, confidence: float) -> PersonaMatch:
         """Construir resultado de match con enriquecimiento"""
