@@ -1,0 +1,16 @@
+{
+  "bandera": "menor_implicado",
+  "efectos": [
+    "activar_regimen_menores",
+    "priorizar_proteccion",
+    "evitar_medidas_coercitivas"
+  ]
+}
+{
+  "bandera": "menor_autor",
+  "efectos": [
+    "activar_fiscalia_menores",
+    "excluir_detencion_adulto",
+    "orientar_diligencias_menores"
+  ]
+}

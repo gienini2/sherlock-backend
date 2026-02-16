@@ -1,0 +1,195 @@
+{
+  "codigo": "CP-T2",
+  "nombre": "Delitos contra la libertad",
+  "sensibilidad": "alta",
+  "familias": [
+    {
+      "familia": "Amenazas",
+      "ambit": "penal",
+      "violencia_o_intimidacion": true,
+      "conductas": [
+        {
+          "id_conducta": "LIB-AME-01",
+          "descripcion": "Anuncio serio y creíble de causar un mal futuro",
+          "patterns_linguistics": [
+            "amenaça",
+            "li diu que el matarà",
+            "li farà mal",
+            "si no fas"
+          ],
+          "condiciones_minimas": [
+            "mal futuro",
+            "credibilidad de la amenaza"
+          ],
+          "indicadores_fuertes": [
+            "amenaza concreta",
+            "reiteracion",
+            "contexto de miedo acreditado"
+          ],
+          "indicadores_debiles": [
+            "expresion colerica",
+            "disputa verbal"
+          ],
+          "articulos_orientativos": [
+            "169 CP",
+            "171 CP"
+          ],
+          "nivel_confianza_base": 0.55
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "mal futuro",
+          "voluntad intimidatoria"
+        ],
+        "excluye": [
+          "insulto",
+          "exabrupto",
+          "amenaza no creible"
+        ]
+      },
+      "alerta_sensibilidad": "alta"
+    },
+
+    {
+      "familia": "Coacciones",
+      "ambit": "penal",
+      "violencia_o_intimidacion": true,
+      "conductas": [
+        {
+          "id_conducta": "LIB-COA-01",
+          "descripcion": "Impedir u obligar a realizar un acto contra la voluntad",
+          "patterns_linguistics": [
+            "li impedeix",
+            "l'obliga",
+            "no el deixa",
+            "força a"
+          ],
+          "condiciones_minimas": [
+            "limitacion de la libertad",
+            "ausencia de causa legal"
+          ],
+          "indicadores_fuertes": [
+            "persistencia",
+            "uso de fuerza",
+            "amenaza vinculada"
+          ],
+          "indicadores_debiles": [
+            "discusion puntual",
+            "conflicto veinal"
+          ],
+          "articulos_orientativos": [
+            "172 CP"
+          ],
+          "nivel_confianza_base": 0.6
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "conducta activa de imposicion",
+          "voluntad contraria de la victima"
+        ],
+        "excluye": [
+          "mera recomendacion",
+          "discusion sin imposicion"
+        ]
+      },
+      "alerta_sensibilidad": "alta"
+    },
+
+    {
+      "familia": "Detención ilegal",
+      "ambit": "penal",
+      "privacion_libertad": true,
+      "conductas": [
+        {
+          "id_conducta": "LIB-DET-01",
+          "descripcion": "Privación de libertad sin causa legal",
+          "patterns_linguistics": [
+            "li impedeix sortir",
+            "el tanca",
+            "el reté",
+            "no el deixa marxar"
+          ],
+          "condiciones_minimas": [
+            "privacion efectiva de libertad",
+            "ausencia de causa legal"
+          ],
+          "indicadores_fuertes": [
+            "duracion apreciable",
+            "barreras fisicas",
+            "amenaza para impedir salida"
+          ],
+          "indicadores_debiles": [
+            "retencion momentanea",
+            "bloqueo verbal"
+          ],
+          "articulos_orientativos": [
+            "163 CP"
+          ],
+          "nivel_confianza_base": 0.4
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "privacion efectiva",
+          "duracion relevante",
+          "voluntad de retener"
+        ],
+        "excluye": [
+          "identificacion policial",
+          "retencion puntual",
+          "discusion domestica"
+        ]
+      },
+      "alerta_sensibilidad": "muy_alta"
+    },
+
+    {
+      "familia": "Allanamiento de morada",
+      "ambit": "penal",
+      "perjudicio_patrimonial": false,
+      "violencia_o_intimidacion": false,
+      "conductas": [
+        {
+          "id_conducta": "LIB-ALL-01",
+          "descripcion": "Entrada o permanencia en morada ajena sin consentimiento",
+          "patterns_linguistics": [
+            "entra al domicili",
+            "roman a l'habitatge",
+            "sense consentiment"
+          ],
+          "condiciones_minimas": [
+            "morada ajena",
+            "ausencia de consentimiento"
+          ],
+          "indicadores_fuertes": [
+            "oposicion expresa",
+            "cambio de cerradura",
+            "testigos"
+          ],
+          "indicadores_debiles": [
+            "acceso previo consentido",
+            "conflicto familiar"
+          ],
+          "articulos_orientativos": [
+            "202 CP"
+          ],
+          "nivel_confianza_base": 0.5
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "entrada o permanencia",
+          "sin consentimiento"
+        ],
+        "excluye": [
+          "autorizacion previa",
+          "conflicto civil",
+          "copropiedad"
+        ]
+      },
+      "alerta_sensibilidad": "alta"
+    }
+  ]
+}

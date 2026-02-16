@@ -1,0 +1,186 @@
+{
+  "codigo": "CP-T5",
+  "nombre": "Delitos contra la seguridad colectiva y los derechos del trabajador",
+  "sensibilidad": "alta",
+  "familias": [
+    {
+      "familia": "Incendios",
+      "ambit": "penal",
+      "violencia_o_intimidacion": false,
+      "conductas": [
+        {
+          "id_conducta": "SEG-INC-01",
+          "descripcion": "Provocar incendio con peligro grave para personas o bienes",
+          "patterns_linguistics": [
+            "provoca un incendi",
+            "cal foc intencionadament",
+            "incendi amb risc per a persones",
+            "foc provocat"
+          ],
+          "condiciones_minimas": [
+            "fuego iniciado",
+            "peligro concreto"
+          ],
+          "indicadores_fuertes": [
+            "riesgo para personas",
+            "evacuacion",
+            "uso de acelerantes"
+          ],
+          "indicadores_debiles": [
+            "conato",
+            "origen no determinado"
+          ],
+          "articulos_orientativos": [
+            "351 CP"
+          ],
+          "nivel_confianza_base": 0.6
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "incendio",
+          "peligro grave y concreto"
+        ],
+        "excluye": [
+          "accidente fortuito",
+          "riesgo leve",
+          "origen tecnico no acreditado"
+        ]
+      },
+      "alerta_sensibilidad": "alta"
+    },
+
+    {
+      "familia": "Riesgos catastróficos",
+      "ambit": "penal",
+      "violencia_o_intimidacion": false,
+      "conductas": [
+        {
+          "id_conducta": "SEG-RIE-01",
+          "descripcion": "Conductas que generan riesgo grave para una colectividad",
+          "patterns_linguistics": [
+            "posa en perill la poblacio",
+            "fuita de gas",
+            "manipulacio perillosa"
+          ],
+          "condiciones_minimas": [
+            "riesgo grave",
+            "afectacion colectiva"
+          ],
+          "indicadores_fuertes": [
+            "zona evacuada",
+            "intervencion de emergencias"
+          ],
+          "indicadores_debiles": [
+            "riesgo potencial",
+            "situacion controlada"
+          ],
+          "articulos_orientativos": [
+            "346 CP"
+          ],
+          "nivel_confianza_base": 0.45
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "riesgo grave",
+          "pluralidad de personas afectadas"
+        ],
+        "excluye": [
+          "riesgo hipotetico",
+          "incumplimiento tecnico leve"
+        ]
+      },
+      "alerta_sensibilidad": "alta"
+    },
+
+    {
+      "familia": "Seguridad en el trabajo",
+      "ambit": "penal",
+      "violencia_o_intimidacion": false,
+      "conductas": [
+        {
+          "id_conducta": "SEG-TRA-01",
+          "descripcion": "Omisión de medidas de seguridad que pone en peligro grave a trabajadores",
+          "patterns_linguistics": [
+            "sense mesures de seguretat",
+            "no facilita equips de proteccio",
+            "incompliment greu"
+          ],
+          "condiciones_minimas": [
+            "omision de medidas",
+            "riesgo grave"
+          ],
+          "indicadores_fuertes": [
+            "accidente grave",
+            "requerimientos previos"
+          ],
+          "indicadores_debiles": [
+            "deficiencia leve",
+            "incumplimiento puntual"
+          ],
+          "articulos_orientativos": [
+            "316 CP"
+          ],
+          "nivel_confianza_base": 0.3
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "riesgo grave",
+          "omision consciente"
+        ],
+        "excluye": [
+          "error tecnico",
+          "acto profesional reglado",
+          "falta administrativa"
+        ]
+      },
+      "alerta_sensibilidad": "media",
+      "nota_operativa": "Orientacion no detentiva. Derivacion judicial/inspeccion de trabajo."
+    },
+
+    {
+      "familia": "Delitos contra la salud pública (riesgo colectivo)",
+      "ambit": "penal",
+      "violencia_o_intimidacion": false,
+      "conductas": [
+        {
+          "id_conducta": "SEG-SAL-01",
+          "descripcion": "Conductas que generan riesgo grave para la salud de la colectividad",
+          "patterns_linguistics": [
+            "posa en perill la salut publica",
+            "productes perillosos",
+            "contaminacio greu"
+          ],
+          "condiciones_minimas": [
+            "riesgo grave",
+            "afectacion colectiva"
+          ],
+          "indicadores_fuertes": [
+            "personas afectadas",
+            "intervencion sanitaria"
+          ],
+          "indicadores_debiles": [
+            "riesgo teorico"
+          ],
+          "articulos_orientativos": [
+            "359 CP"
+          ],
+          "nivel_confianza_base": 0.4
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "riesgo grave",
+          "pluralidad de afectados"
+        ],
+        "excluye": [
+          "infraccion administrativa",
+          "riesgo controlado"
+        ]
+      },
+      "alerta_sensibilidad": "alta"
+    }
+  ]
+}

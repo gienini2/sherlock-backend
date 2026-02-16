@@ -1,0 +1,101 @@
+{
+  "codigo": "CP-SV",
+  "nombre": "Delitos contra la seguridad vial",
+  "sensibilidad": "muy_alta",
+  "familias": [
+    {
+      "familia": "Conduccion bajo la influencia de alcohol o drogas",
+      "ambit": "penal",
+      "detencion_posible": true,
+      "conductas": [
+        {
+          "id_conducta": "SV-ALC-01",
+          "descripcion": "Conduccion bajo la influencia de alcohol",
+          "patterns_linguistics": [
+            "conduia sota els efectes",
+            "presenta simptomatologia",
+            "olor a alcohol",
+            "parla pastosa",
+            "accident previ"
+          ],
+          "condiciones_minimas": [
+            "conduccion acreditada",
+            "influencia apreciable"
+          ],
+          "indicadores_fuertes": [
+            "accidente",
+            "sintomatologia clara",
+            "tasa penal",
+            "negativa a pruebas"
+          ],
+          "indicadores_debiles": [
+            "tasa administrativa",
+            "consumo posterior no aclarado"
+          ],
+          "nota_operativa": "La influencia prevalece sobre la tasa"
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "conduccion",
+          "influencia"
+        ],
+        "excluye": [
+          "consumo posterior acreditado",
+          "ausencia total de sintomatologia"
+        ]
+      }
+    },
+
+    {
+      "familia": "Negativa a someterse a pruebas",
+      "ambit": "penal",
+      "detencion_posible": true,
+      "conductas": [
+        {
+          "id_conducta": "SV-NEG-01",
+          "descripcion": "Negativa injustificada a someterse a pruebas de alcoholemia o drogas",
+          "patterns_linguistics": [
+            "es nega a sotmetre's",
+            "refusa la prova",
+            "no col·labora"
+          ],
+          "condiciones_minimas": [
+            "requerimiento legitimo",
+            "negativa expresa"
+          ],
+          "indicadores_fuertes": [
+            "doble negativa",
+            "advertencia legal previa"
+          ],
+          "nota_operativa": "Delito autonomo"
+        }
+      ]
+    },
+
+    {
+      "familia": "Conduccion temeraria",
+      "ambit": "penal",
+      "detencion_posible": true,
+      "conductas": [
+        {
+          "id_conducta": "SV-TEM-01",
+          "descripcion": "Conduccion con desprecio manifiesto por la vida o integridad",
+          "patterns_linguistics": [
+            "conduccio temeraria",
+            "maniobres perilloses",
+            "excés greu de velocitat"
+          ],
+          "condiciones_minimas": [
+            "riesgo concreto"
+          ],
+          "indicadores_fuertes": [
+            "persecucion",
+            "riesgo para terceros",
+            "grabacion"
+          ]
+        }
+      ]
+    }
+  ]
+}

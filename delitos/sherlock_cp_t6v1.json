@@ -1,0 +1,189 @@
+{
+  "codigo": "CP-T6",
+  "nombre": "Delitos contra el orden público",
+  "sensibilidad": "alta",
+  "familias": [
+    {
+      "familia": "Desórdenes públicos",
+      "ambit": "penal",
+      "violencia_o_intimidacion": true,
+      "conductas": [
+        {
+          "id_conducta": "ORD-DES-01",
+          "descripcion": "Alteración grave del orden público con violencia o intimidación",
+          "patterns_linguistics": [
+            "alteracio greu de l'ordre public",
+            "avalots",
+            "destrosses en via publica",
+            "llancament d'objectes"
+          ],
+          "condiciones_minimas": [
+            "alteracion del orden",
+            "gravedad apreciable"
+          ],
+          "indicadores_fuertes": [
+            "violencia colectiva",
+            "daños generalizados",
+            "intervencion policial masiva"
+          ],
+          "indicadores_debiles": [
+            "concentracion tensa",
+            "gritos o consignas"
+          ],
+          "articulos_orientativos": [
+            "557 CP"
+          ],
+          "nivel_confianza_base": 0.55
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "alteracion grave",
+          "conducta activa"
+        ],
+        "excluye": [
+          "manifestacion pacifica",
+          "molestias leves",
+          "infraccion administrativa"
+        ]
+      },
+      "alerta_sensibilidad": "alta"
+    },
+
+    {
+      "familia": "Atentado contra la autoridad",
+      "ambit": "penal",
+      "violencia_o_intimidacion": true,
+      "conductas": [
+        {
+          "id_conducta": "ORD-ATE-01",
+          "descripcion": "Agresión o intimidación grave a agente de la autoridad",
+          "patterns_linguistics": [
+            "agredeix l'agent",
+            "intenta colpejar",
+            "empeny violentament",
+            "amenaça greu a policia"
+          ],
+          "condiciones_minimas": [
+            "agente en ejercicio",
+            "violencia o intimidacion grave"
+          ],
+          "indicadores_fuertes": [
+            "lesiones al agente",
+            "uso de objetos",
+            "pluralidad de agresores"
+          ],
+          "indicadores_debiles": [
+            "forcejeo leve",
+            "resistencia verbal"
+          ],
+          "articulos_orientativos": [
+            "550 CP"
+          ],
+          "nivel_confianza_base": 0.6
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "violencia o intimidacion grave",
+          "agente en ejercicio"
+        ],
+        "excluye": [
+          "falta de respeto",
+          "discusion verbal",
+          "oposicion pasiva"
+        ]
+      },
+      "alerta_sensibilidad": "muy_alta"
+    },
+
+    {
+      "familia": "Resistencia y desobediencia",
+      "ambit": "penal",
+      "violencia_o_intimidacion": false,
+      "conductas": [
+        {
+          "id_conducta": "ORD-RES-01",
+          "descripcion": "Oposición activa y grave a la actuación policial",
+          "patterns_linguistics": [
+            "s'oposa activament",
+            "impedeix l'actuacio policial",
+            "no obeeix reiteradament"
+          ],
+          "condiciones_minimas": [
+            "orden legitima",
+            "oposicion activa"
+          ],
+          "indicadores_fuertes": [
+            "persistencia",
+            "uso de fuerza"
+          ],
+          "indicadores_debiles": [
+            "negativa puntual",
+            "retraso en obedecer"
+          ],
+          "articulos_orientativos": [
+            "556 CP"
+          ],
+          "nivel_confianza_base": 0.45
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "oposicion activa",
+          "orden legitima"
+        ],
+        "excluye": [
+          "oposicion pasiva",
+          "desobediencia leve",
+          "ambito administrativo"
+        ]
+      },
+      "alerta_sensibilidad": "media"
+    },
+
+    {
+      "familia": "Tenencia de armas u objetos peligrosos en contexto de alteración",
+      "ambit": "penal",
+      "violencia_o_intimidacion": false,
+      "conductas": [
+        {
+          "id_conducta": "ORD-ARM-01",
+          "descripcion": "Portar armas u objetos peligrosos en contexto de alteración del orden",
+          "patterns_linguistics": [
+            "porta arma",
+            "objecte contundent",
+            "ganivet en context d'avalot"
+          ],
+          "condiciones_minimas": [
+            "objeto peligroso",
+            "contexto de alteracion"
+          ],
+          "indicadores_fuertes": [
+            "uso del objeto",
+            "amenaza con el objeto"
+          ],
+          "indicadores_debiles": [
+            "tenencia pasiva",
+            "objeto no exhibido"
+          ],
+          "articulos_orientativos": [
+            "563 CP"
+          ],
+          "nivel_confianza_base": 0.4
+        }
+      ],
+      "llindar_penal": {
+        "minimo": [
+          "objeto peligroso",
+          "riesgo para terceros"
+        ],
+        "excluye": [
+          "tenencia reglamentada",
+          "ausencia de riesgo"
+        ]
+      },
+      "alerta_sensibilidad": "media"
+    }
+  ]
+}
