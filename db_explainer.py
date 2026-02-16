@@ -110,12 +110,9 @@ def explicar_vehiculo(match: Dict, db_adapter) -> Dict:
 
 
 def explicar_persona(match: Dict, db_adapter) -> Dict:
-    """Genera explicación estructurada de persona"""
-    entidad = match.get("entidad_original", {})
-    db_data = match.get("db_record", {})
-    dni = db_data.get("dni", "")
-    
-    # Datos actuales
+    db_data = match.get("db_record", {})   # ← CAMBIO CLAVE
+    dni = db_data.get("dni", "")           # ← CAMBIO CLAVE
+
     datos_actuales = {
         "nombre": db_data.get("nombre", ""),
         "apellidos": db_data.get("apellidos", ""),
@@ -184,7 +181,7 @@ def generar_explicaciones(matches: Dict, db_adapter) -> List[Dict]:
     
     # Vehículos
     for vehiculo_match in matches.get("vehiculos", []):
-        if vehiculo_match.get("match_type", "").lower() in ["exact", "partial"]:
+        if vehiculo_match.get("db_record"):
             try:
                 explicacion = explicar_vehiculo(vehiculo_match, db_adapter)
                 explicaciones.append(explicacion)
@@ -193,7 +190,7 @@ def generar_explicaciones(matches: Dict, db_adapter) -> List[Dict]:
     
     # Personas
     for persona_match in matches.get("personas", []):
-        if persona_match.get("match_type", "").lower() in ["exact", "partial"]:
+        if persona_match.get("db_record"):
             try:
                 explicacion = explicar_persona(persona_match, db_adapter)
                 explicaciones.append(explicacion)
@@ -203,6 +200,7 @@ def generar_explicaciones(matches: Dict, db_adapter) -> List[Dict]:
     logger.info(f"[EXPLAINER] Generadas {len(explicaciones)} explicaciones")
     
     return explicaciones
+
 
 
 
