@@ -1,0 +1,17 @@
+{
+  "animo_lucro": 1.0,
+  "apoderamiento": 1.0,
+  "fuerza_en_cosas": 1.0,
+  "violencia_persona": 0.1,
+  "intimidacion": 0.1,
+  "uso_arma": 0.2,
+  "cuantia_economica": 0.7,
+  "acceso_no_autorizado": 1.0,
+  "especial_valor_bien": 0.0,
+  "engaño": 0.0,
+  "abuso_confianza": 0.0,
+  "uso_indebido_bien": 0.0,
+  "deterioro_bien": 0.3,
+  "ocupacion_inmueble": 0.0,
+  "falsificacion_medio_pago": 0.0
+}
