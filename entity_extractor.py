@@ -204,7 +204,7 @@ async def extract_entities_claude(texto: str, anthropic_client) -> Dict:
     # --- Llamada a Claude ---
     try:
         message = anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-sonnet-20240229",
             max_tokens=1500,
             system=prompt_sistema,
             messages=[{"role": "user", "content": texto}]
