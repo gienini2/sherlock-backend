@@ -424,7 +424,8 @@ async def _redactar_drag(texto_marcat: str, mode: str) -> str:
         prompt += "\n\nMODE: ENTRADA DE BITÀCOLA BREU (60-100 paraules)"
 
     msg = anthropic_client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-3-sonnet-20240229",  # ← Modelo correcto de Claude
+        # o "claude-3-5-sonnet-20241022" si usas la última versión
         max_tokens=1200,
         system=prompt,
         messages=[{"role": "user", "content": texto_marcat}]
