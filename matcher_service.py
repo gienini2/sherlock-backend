@@ -371,7 +371,7 @@ class MatcherService:
 
         if nombre or apellidos:
             fuzzy = self._buscar_persona_by_nombre(nombre, apellidos)
-            if fuzzy and fuzzy[0][1] >= 0.70:
+            if fuzzy and fuzzy[0][1] >= 0.60:
                 conf       = fuzzy[0][1]
                 match_type = "EXACTO" if conf >= 0.95 else "PARCIAL"
                 return self._build_persona_match(persona, fuzzy[0][0], match_type, conf)
@@ -395,9 +395,10 @@ class MatcherService:
             candidatos = self._q(
                 "SELECT dni, nombre, apellidos, direccion, telefono, "
                 "fecha_nacimiento, sexo, observaciones "
-                "FROM persons WHERE apellidos LIKE ?",
-                (f"%{primer_token}%",)
-            )
+                WHERE apellidos LIKE ? OR nombre LIKE ?
+                """,
+                (f"%{primer_token}%", f"%{nombre}%")
+                )
         else:
             candidatos = self._q(
                 "SELECT dni, nombre, apellidos, direccion, telefono, "
