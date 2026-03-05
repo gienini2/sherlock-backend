@@ -395,8 +395,7 @@ class MatcherService:
             candidatos = self._q(
                 "SELECT dni, nombre, apellidos, direccion, telefono, "
                 "fecha_nacimiento, sexo, observaciones "
-                WHERE apellidos LIKE ? OR nombre LIKE ?
-                """,
+                WHERE apellidos LIKE ? OR nombre LIKE ?,
                 (f"%{primer_token}%", f"%{nombre}%")
                 )
         else:
