@@ -207,9 +207,18 @@ async def process(request: ProcessRequest):
 
     # -------------------------------------------------------------------------
     # PAS 1+2 — Extracció per regex + contrast amb BD
+    # El regex necessita majúscules per detectar noms propis.
+    # Capitalitzem cada paraula però conservem texto_orig per al marcador i DRAG.
     # -------------------------------------------------------------------------
     from entity_extractor import extract_entities_regex
-    entitats_regex = extract_entities_regex(texto_orig)
+
+    # Capitalitzar per facilitar detecció de noms propis (regex NOM_RE)
+    texto_capitalizado = " ".join(
+        w.capitalize() if w.isalpha() else w
+        for w in texto_orig.split()
+    )
+    logger.info(f"[PAS 1] Text capitalitzat per regex: {texto_capitalizado[:80]}...")
+    entitats_regex = extract_entities_regex(texto_capitalizado)
 
     entitats_per_matcher = {
         "vehiculos":   entitats_regex.get("vehicles",  []),
