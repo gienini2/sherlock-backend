@@ -386,30 +386,38 @@ class MatcherService:
             (self._normalizar_dni(dni),)
         )
 
-    def _buscar_persona_by_nombre(
-        self, nombre: str, apellidos: str
-    ) -> List[Tuple[Dict, float]]:
-        """Pre-filtra por primer token de apellidos antes del token matching."""
-        primer_token = apellidos.split()[0] if apellidos.split() else nombre[:3] if nombre else ""
-        if primer_token:
-            candidatos = self._q("""
-                SELECT dni, nombre, apellidos, direccion, telefono,
-                fecha_nacimiento, sexo, observaciones 
-                FROM persons
-                WHERE apellidos LIKE ? OR nombre LIKE ?""",
-                (f"%{primer_token}%", f"%{nombre}%")
-                )
-        else:
-            candidatos = self._q(
-                "SELECT dni, nombre, apellidos, direccion, telefono, "
-                "fecha_nacimiento, sexo, observaciones FROM persons"
-            )
+def _buscar_persona_by_nombre(
+    self, nombre: str, apellidos: str
+) -> List[Tuple[Dict, float]]:
 
-        resultados = self.token_matcher.buscar_persona_fuzzy_tokens(
-            nombre, apellidos, candidatos, umbral=0.70
+    primer_token = apellidos.split()[0] if apellidos.split() else nombre[:3] if nombre else ""
+
+    if primer_token:
+
+        sql = (
+            "SELECT dni, nombre, apellidos, direccion, telefono, "
+            "fecha_nacimiento, sexo, observaciones "
+            "FROM persons "
+            "WHERE apellidos LIKE ? OR nombre LIKE ?"
         )
-        return [(p, c) for p, c, _ in resultados]
 
+        candidatos = self._q(sql, (f"%{primer_token}%", f"%{nombre}%"))
+
+    else:
+
+        sql = (
+            "SELECT dni, nombre, apellidos, direccion, telefono, "
+            "fecha_nacimiento, sexo, observaciones "
+            "FROM persons"
+        )
+
+        candidatos = self._q(sql)
+
+    resultados = self.token_matcher.buscar_persona_fuzzy_tokens(
+        nombre, apellidos, candidatos, umbral=0.60
+    )
+
+    return [(p, c) for p, c, _ in resultados]
     def _build_persona_match(
         self, entidad: Dict, db_record: Dict, match_type: str, confidence: float
     ) -> PersonaMatch:
