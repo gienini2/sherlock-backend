@@ -392,10 +392,11 @@ class MatcherService:
         """Pre-filtra por primer token de apellidos antes del token matching."""
         primer_token = apellidos.split()[0] if apellidos.split() else nombre[:3] if nombre else ""
         if primer_token:
-            candidatos = self._q(
-                "SELECT dni, nombre, apellidos, direccion, telefono, "
-                "fecha_nacimiento, sexo, observaciones "
-                WHERE apellidos LIKE ? OR nombre LIKE ?,
+            candidatos = self._q("""
+                SELECT dni, nombre, apellidos, direccion, telefono,
+                fecha_nacimiento, sexo, observaciones 
+                FROM persons
+                WHERE apellidos LIKE ? OR nombre LIKE ?""",
                 (f"%{primer_token}%", f"%{nombre}%")
                 )
         else:
