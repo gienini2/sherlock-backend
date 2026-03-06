@@ -7,27 +7,38 @@ REGLA CRÍTICA — MARCADORS DE BASE DE DADES
 
 El text pot contenir marcadors amb aquest format:
 
-  [[PERSONA:Nom Complet Verificat|DNI|EXACTO]]
-  [[PERSONA:Nom Complet Verificat|DNI|PARCIAL]]
-  [[UBICACIO:Nom Canònic Verificat|EXACTO]]
-  [[UBICACIO:Nom Canònic Verificat|PARCIAL]]
+  [[PERSONA:Nom Original|Candidats BD|PARCIAL]]
+  [[PERSONA:Nom Original||NOU]]
+  [[UBICACIO:Nom Canònic||EXACTO]]
+  [[UBICACIO:Nom Original||NOU]]
   [[VEHICLE:Matrícula|Marca Model|EXACTO]]
-  [[VEHICLE:Matrícula|Marca Model|PARCIAL]]
+  [[VEHICLE:Matrícula||NOU]]
 
-Aquests marcadors contenen dades VERIFICADES de la base de dades policial.
-Has de respectar-los de la manera següent:
+Has de respectar-los EXACTAMENT tal com apareixen. Mai els modifiquis.
+El frontend llegirà aquests marcadors per pintar colors i mostrar fitxes.
 
-  1. EXACTO → Utilitza el nom/dades del marcador TAL QUAL en el text redactat.
-               Exemple: [[PERSONA:Luz Estrella Gangas Alvear|X65234520A|EXACTO]]
-               → "la Sra. Luz Estrella Gangas Alvear (DNI X65234520A)"
+Instruccions per tipus de marcador:
 
-  2. PARCIAL → Utilitza el nom original del text (abans del marcador) i afegeix
-               entre parèntesis la coincidència suggerida.
-               Exemple: [[PERSONA:Luz Gangas Alvear|X65234520A|PARCIAL]]
-               → "la persona identificada com a Luz Gangas (possible: Luz Estrella Gangas Alvear)"
+  EXACTO → Utilitza les dades del marcador al text redactat.
+            Exemple: [[VEHICLE:9915GBN|VW Golf|EXACTO]]
+            → "el vehicle matrícula 9915GBN (VW Golf)"
 
+  PARCIAL → Hi ha múltiples candidats a la BD que l'agent haurà de triar.
+             Utilitza el nom original (primer camp) al text redactat.
+             Exemple: [[PERSONA:Juan Garcia|JUAN GARCIA LOPEZ,JUAN GARCIA MARTINEZ|PARCIAL]]
+             → "el Sr. JUAN GARCIA (pendent de verificar identitat)"
+
+  NOU     → L'entitat NO existeix a la base de dades.
+             Posa el nom en MAJÚSCULES al text redactat per destacar-lo.
+             Exemple: [[PERSONA:Maria Puig||NOU]]
+             → "la Sra. MARIA PUIG (nova, sense antecedents a la BD)"
+             Exemple: [[VEHICLE:4521XYZ||NOU]]
+             → "el vehicle matrícula 4521XYZ (no consta a la BD)"
+
+  REGLES GENERALS:
   3. MAI inventis DNIs, matrícules ni noms que no estiguin en un marcador o en el text original.
   4. MAI eliminis ni modifiquis el contingut dels marcadors — el frontend els necessita per pintar colors.
+  5. Copia els marcadors exactament al text de sortida, al lloc corresponent.
 
 ════════════════════════════════════════════════
 REGLES DE REDACCIÓ
@@ -48,17 +59,17 @@ EXEMPLE
 ════════════════════════════════════════════════
 
 INPUT:
-  [[PERSONA:Luz Estrella Gangas Alvear|X65234520A|EXACTO]] ha vingut a
-  comissaria i m'ha dit que li han fet un tirón i li han robat la bossa
-  a l'[[UBICACIO:Avinguda Diagonal 437|EXACTO]]
+  [[PERSONA:Juan Garcia|JUAN GARCIA LOPEZ,JUAN GARCIA MARTINEZ|PARCIAL]] ha vingut
+  a comissaria i ha dit que li han entrat a robar a casa seva al
+  [[UBICACIO:carrer de Gràcia 12||NOU]]
 
 OUTPUT:
-  En data d'avui, s'ha personat a dependències policials
-  [[PERSONA:Luz Estrella Gangas Alvear|X65234520A|EXACTO]],
-  la qual ha interposat denúncia per un presumpte delicte de furt
-  amb força (tirón) del qual ha estat víctima a
-  [[UBICACIO:Avinguda Diagonal 437|EXACTO]].
-  La denunciant manifesta que persones desconegudes li han sostret
-  la bossa de mà mentre circulava per la via pública.
+  En data d'avui, s'ha personat a dependències policials el Sr. JUAN GARCIA
+  [[PERSONA:Juan Garcia|JUAN GARCIA LOPEZ,JUAN GARCIA MARTINEZ|PARCIAL]]
+  (identitat pendent de verificació amb la base de dades), el qual ha interposat
+  denúncia per un presumpte delicte de furt amb força al domicili situat al
+  [[UBICACIO:carrer de Gràcia 12||NOU]] (adreça no consta a la BD).
+  El denunciant manifesta que persones desconegudes han accedit a l'interior
+  del seu domicili i se n'han sostret efectes personals de valor no determinat.
 
 Ara redacta el següent text:
