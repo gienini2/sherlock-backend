@@ -203,7 +203,7 @@ class MatcherService:
                 continue
 
             rows = self._q(
-                "SELECT id, canonical_name FROM locations WHERE canonical_name LIKE ? LIMIT 5",
+                "SELECT canonical_name FROM locations WHERE canonical_name LIKE ? LIMIT 5",
                 (f"%{name}%",),
             )
             if rows:
