@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 logger = logging.getLogger("matcher_service")
 
@@ -9,10 +9,6 @@ class MatcherService:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
-
-    # ------------------------------------------------------------------
-    # DB helper
-    # ------------------------------------------------------------------
 
     def _q(self, sql, params=()):
         try:
@@ -28,51 +24,31 @@ class MatcherService:
             return []
 
     def close(self):
-        """Mètode close() per compatibilitat amb el shutdown de l'orquestrador."""
-        pass  # SQLite obre/tanca connexió per consulta, res a tancar aquí
-
-    # ------------------------------------------------------------------
-    # ENTRYPOINT
-    # ------------------------------------------------------------------
+        pass
 
     def contrastar_entidades(self, entidades: Dict) -> Dict:
-        """
-        Retorna directament el dict de matches (sense clau 'matches' intermèdia).
-        Format de retorn:
-            {
-                "personas":    [...],
-                "vehiculos":   [...],
-                "ubicaciones": [...],
-            }
-        Cada element porta:
-            - texto:            text original extret
-            - match_type:       PARCIAL | SIN_COINCIDENCIA
-            - confidence:       float 0.0-1.0
-            - db_record:        dict de la BD (o None)
-            - position:         {start, end} al text original
-            - entidad_original: la entitat sencera tal com ve del extractor
-        """
         logger.info("Iniciando contraste de entidades")
-
         result = {
             "personas":    self._match_personas(entidades.get("personas", [])),
             "vehiculos":   self._match_vehiculos(entidades.get("vehiculos", [])),
             "ubicaciones": self._match_ubicaciones(entidades.get("ubicaciones", [])),
         }
-
         logger.info(
             f"Contraste completado: "
             f"{len(result['vehiculos'])} vehículos, "
             f"{len(result['personas'])} personas, "
             f"{len(result['ubicaciones'])} ubicaciones"
         )
-
         return result
 
     # ------------------------------------------------------------------
-    # PERSONAS — retorna TOTS els resultats com PARCIAL
-    # Si no hi ha cap coincidència → SIN_COINCIDENCIA (però l'orquestrador
-    # l'injectarà com [[PERSONA:NOM||NOU]] gràcies a _injectar_marcadors)
+    # PERSONAS
+    # Problema anterior: la query usaba OR suelto entre nombre y apellidos
+    # separados, lo que devolvía cualquier "Angeles" o "Juan" de la BD.
+    #
+    # Solución: buscamos por CADA palabra del texto extraído y luego
+    # filtramos en Python los resultados que no tengan mínimo 2 palabras
+    # coincidentes. Esto elimina los falsos positivos de 0%.
     # ------------------------------------------------------------------
 
     def _match_personas(self, personas: List[Dict]) -> List[Dict]:
@@ -85,35 +61,34 @@ class MatcherService:
             if not nombre:
                 continue
 
+            # Palabras significativas del texto (≥3 chars para excluir "Ha", "De", "El"...)
+            palabras = [
+                w for w in f"{nombre} {apellidos}".split()
+                if len(w) >= 3
+            ]
+
+            if not palabras:
+                continue
+
+            # Query dinámica: una condición LIKE por cada palabra
+            condiciones = " OR ".join(
+                ["nombre LIKE ? OR apellidos LIKE ?"] * len(palabras)
+            )
+            params = []
+            for w in palabras:
+                params.extend([f"%{w}%", f"%{w}%"])
+
             rows = self._q(
-                """
+                f"""
                 SELECT dni, nombre, apellidos, direccion, telefono, fecha_nacimiento
                 FROM persons
-                WHERE nombre    LIKE ?
-                   OR apellidos LIKE ?
-                   OR nombre    LIKE ?
-                LIMIT 10
+                WHERE {condiciones}
+                LIMIT 20
                 """,
-                (
-                    f"%{nombre}%",
-                    f"%{apellidos}%",
-                    f"%{apellidos}%",
-                ),
+                params,
             )
 
-            if rows:
-                # Totes les coincidències com PARCIAL — l'agent tria a la pestanya BD
-                for row in rows:
-                    matches.append({
-                        "texto":            f"{nombre} {apellidos}".strip(),
-                        "match_type":       "PARCIAL",
-                        "confidence":       self._confidence_persona(p, row),
-                        "db_record":        row,
-                        "position":         p.get("position"),
-                        "entidad_original": p,   # ← necessari per _injectar_marcadors
-                    })
-            else:
-                # Sense coincidència → el redactor la marcarà com NOU
+            if not rows:
                 matches.append({
                     "texto":            f"{nombre} {apellidos}".strip(),
                     "match_type":       "SIN_COINCIDENCIA",
@@ -122,49 +97,70 @@ class MatcherService:
                     "position":         p.get("position"),
                     "entidad_original": p,
                 })
+                continue
+
+            # Filtrar en Python: mínimo 2 palabras del texto deben coincidir
+            # en el registro de BD. Esto elimina los "Angeles" sueltos.
+            MIN_COINCIDENCIAS = 2
+            candidatos = []
+
+            for row in rows:
+                conf, n = self._confidence_persona(palabras, row)
+                if n >= MIN_COINCIDENCIAS:
+                    candidatos.append((conf, row))
+
+            if not candidatos:
+                matches.append({
+                    "texto":            f"{nombre} {apellidos}".strip(),
+                    "match_type":       "SIN_COINCIDENCIA",
+                    "confidence":       0.0,
+                    "db_record":        None,
+                    "position":         p.get("position"),
+                    "entidad_original": p,
+                })
+                continue
+
+            # Ordenar por confianza descendente, todos como PARCIAL
+            candidatos.sort(key=lambda x: x[0], reverse=True)
+
+            for conf, row in candidatos:
+                matches.append({
+                    "texto":            f"{nombre} {apellidos}".strip(),
+                    "match_type":       "PARCIAL",
+                    "confidence":       conf,
+                    "db_record":        row,
+                    "position":         p.get("position"),
+                    "entidad_original": p,
+                })
 
         return matches
 
-    def _confidence_persona(self, extreta: Dict, db_row: Dict) -> float:
+    def _confidence_persona(self, palabras: List[str], db_row: Dict) -> Tuple[float, int]:
         """
-        Càlcul de similitud simple entre l'entitat extreta i el registre de BD.
-        Compara nom + cognoms per paraules coincidents.
+        Cuenta cuántas palabras del texto extraído aparecen en el nombre completo de BD.
+        Devuelve (confidence, num_coincidencias).
+        Ejemplo: ["Luz","Estrella","Gangas"] vs "Luz Estrella Gangas Alvear" → (0.75, 3)
         """
-        nom_extret = f"{extreta.get('nombre','')} {extreta.get('apellidos','')}".upper().split()
-        nom_db     = f"{db_row.get('nombre','')} {db_row.get('apellidos','')}".upper().split()
-
-        if not nom_extret or not nom_db:
-            return 0.5
-
-        coincidencies = sum(1 for p in nom_extret if p in nom_db)
-        total         = max(len(nom_extret), len(nom_db))
-
-        return round(coincidencies / total, 2)
+        nom_db = f"{db_row.get('nombre','')} {db_row.get('apellidos','')}".upper()
+        n = sum(1 for p in palabras if p.upper() in nom_db)
+        conf = round(n / len(palabras), 2) if palabras else 0.0
+        return conf, n
 
     # ------------------------------------------------------------------
-    # VEHICULOS — coincidència exacta per matrícula
-    # FIX: el extractor envia 'matricula', no 'plate'
+    # VEHICULOS
     # ------------------------------------------------------------------
 
     def _match_vehiculos(self, vehiculos: List[Dict]) -> List[Dict]:
         matches = []
-
         for v in vehiculos:
-            # L'extractor regex retorna 'matricula'; l'extractor Claude retorna 'matricula' també
             matricula = (v.get("matricula") or v.get("plate") or "").strip().upper()
-
             if not matricula:
                 continue
 
             rows = self._q(
-                """
-                SELECT plate, brand, model, color
-                FROM vehicles
-                WHERE plate = ?
-                """,
+                "SELECT plate, brand, model, color FROM vehicles WHERE plate = ?",
                 (matricula,),
             )
-
             if rows:
                 matches.append({
                     "texto":            matricula,
@@ -175,27 +171,19 @@ class MatcherService:
                     "entidad_original": v,
                 })
             else:
-                # Cerca parcial pels primers 4 caràcters (números de la matrícula)
-                rows_parcial = self._q(
-                    """
-                    SELECT plate, brand, model, color
-                    FROM vehicles
-                    WHERE plate LIKE ?
-                    LIMIT 5
-                    """,
+                rows_p = self._q(
+                    "SELECT plate, brand, model, color FROM vehicles WHERE plate LIKE ? LIMIT 5",
                     (f"%{matricula[:4]}%",),
                 ) if len(matricula) >= 4 else []
 
-                match_type = "PARCIAL" if rows_parcial else "SIN_COINCIDENCIA"
                 matches.append({
                     "texto":            matricula,
-                    "match_type":       match_type,
-                    "confidence":       0.7 if rows_parcial else 0.0,
-                    "db_record":        rows_parcial[0] if rows_parcial else None,
+                    "match_type":       "PARCIAL" if rows_p else "SIN_COINCIDENCIA",
+                    "confidence":       0.7 if rows_p else 0.0,
+                    "db_record":        rows_p[0] if rows_p else None,
                     "position":         v.get("position"),
                     "entidad_original": v,
                 })
-
         return matches
 
     # ------------------------------------------------------------------
@@ -204,29 +192,20 @@ class MatcherService:
 
     def _match_ubicaciones(self, ubicaciones: List[Dict]) -> List[Dict]:
         matches = []
-
         for u in ubicaciones:
-            # El extractor regex retorna 'texto_completo'
             name = (
                 u.get("canonical_name")
                 or u.get("texto_completo")
                 or u.get("nombre_via")
                 or ""
             ).strip()
-
             if not name:
                 continue
 
             rows = self._q(
-                """
-                SELECT id, canonical_name
-                FROM locations
-                WHERE canonical_name LIKE ?
-                LIMIT 5
-                """,
+                "SELECT id, canonical_name FROM locations WHERE canonical_name LIKE ? LIMIT 5",
                 (f"%{name}%",),
             )
-
             if rows:
                 matches.append({
                     "texto":            name,
@@ -245,18 +224,8 @@ class MatcherService:
                     "position":         u.get("position"),
                     "entidad_original": u,
                 })
-
         return matches
 
 
-# ----------------------------------------------------------------------
-# UTIL — ara no cal transformar res, el dict ja té el format correcte
-# Mantenim la funció per compatibilitat amb els imports existents
-# ----------------------------------------------------------------------
-
 def matches_to_dict(matches: Dict) -> Dict:
-    """
-    Passthrough. El MatcherService ja retorna el format correcte.
-    Funció mantinguda per compatibilitat amb imports existents.
-    """
     return matches
