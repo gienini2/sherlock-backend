@@ -1,6 +1,15 @@
 """
-SHERLOCK — Orquestador v4.0
+SHERLOCK — Orquestrador v4.1
 ============================
+
+CANVIS v4.1 respecte v4.0:
+  - FIX: matches_result["matches"] → matches_result (el MatcherService
+    ja retorna el dict directe, sense clau 'matches' intermèdia)
+  - FIX: matcher_service.close() → afegit mètode close() al MatcherService
+  - FIX: _injectar_marcadors ara gestiona PARCIAL (múltiples candidats)
+    i NOU (sense coincidència a la BD)
+  - FIX: matches_to_dict ara és un passthrough (sense transformació)
+  - FIX: _match_vehiculos ara llegeix 'matricula' (no 'plate')
 
 FLUX ACORDAT:
 
@@ -12,52 +21,37 @@ FLUX ACORDAT:
        │  Cada entitat porta posició {start, end} al text original
        ▼
   [PAS 2] contrastar_entidades (MatcherService)
-       │  Compara contra BD amb similitud
-       │  → EXACTO  (≥0.95): cert match
-       │  → PARCIAL (≥0.70): match probable
-       │  → SIN_COINCIDENCIA: no trobat
+       │  Compara contra BD
+       │  → EXACTO  (vehicles/ubicacions): coincidència certa
+       │  → PARCIAL (persones): tots els candidats possibles
+       │  → SIN_COINCIDENCIA: no trobat → marcat com NOU al DRAG
        ▼
   [PAS 3] _injectar_marcadors
-       │  Substitueix text original per marcadors protegits:
-       │    "luz estrella gangas" → [[PERSONA:Luz Estrella Gangas Alvear|X65234520A|EXACTO]]
-       │    "comisaria"          → [[UBICACIO:Comissaria Districte 3||EXACTO]]
-       │  Si no hi ha match → el text queda sense tocar
+       │  EXACTO  → [[VEHICLE:9915GBN|VW Golf|EXACTO]]
+       │  PARCIAL → [[PERSONA:Juan Garcia (BD: JUAN GARCIA LOPEZ)||PARCIAL]]
+       │  NOU     → [[PERSONA:Juan Garcia||NOU]]
        ▼
   text col·loquial amb marcadors
        │
        ▼
   [PAS 4] _redactar_drag (Claude / Bitàcola)
        │  Claude redacta en format DRAG professional
-       │  El prompt li indica que respecti els marcadors [[...]] exactament
-       │  → no inventa DNIs ni noms que no estiguin en marcadors
+       │  Respecta els marcadors [[...]] exactament
        ▼
   text DRAG amb marcadors intactes
        │
        ▼
   [PAS 5] extract_entities_regex (sobre el text DRAG)
-       │  Detecta entitats que hagin aparegut durant la redacció
-       │  i que no estaven al text original (cas rar però possible)
-       │  → filtra les que ja estan marcades
+       │  Detecta entitats residuals no presents al text original
        ▼
   [PAS 6] AnnotatorService.anotar_text_amb_marcadors
-       │  Llegeix marcadors [[...]] del text DRAG
-       │  → genera text NET (sense sintaxi [[...]])
-       │  → genera spans (start/end/color/tooltip) sobre el text net
-       │  → construeix payload per a pestanya BD
+       │  Llegeix marcadors → text NET + spans per al frontend
        ▼
   AnalyzeResponse → frontend
-       ├── texto_drag:   text net per al editor (editable per l'agent)
-       ├── anotaciones:  spans per pintar (blau=exacto, taronja=parcial)
-       ├── entidades:    dades per a pestanya BD (historial, risc)
+       ├── texto_drag:   text net per al editor
+       ├── anotaciones:  spans per pintar
+       ├── entidades:    dades per a pestanya BD
        └── ms:           temps total
-
-COLORS AL FRONTEND:
-  PERSONA  EXACTO  → blau    (#cce5ff)
-  PERSONA  PARCIAL → taronja (#fff3cd)
-  VEHICLE  EXACTO  → verd    (#d4edda)
-  VEHICLE  PARCIAL → taronja (#fff3cd)
-  UBICACIO EXACTO  → lila    (#e2d9f3)
-  UBICACIO PARCIAL → taronja (#fff3cd)
 """
 
 import os
@@ -72,7 +66,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import anthropic
 
-from matcher_service  import MatcherService, matches_to_dict
+from matcher_service   import MatcherService, matches_to_dict
 from annotator_service import AnnotatorService
 
 logging.basicConfig(
@@ -96,7 +90,7 @@ if not Path(DB_PATH).exists():
 
 # Regex per detectar marcadors ja injectats al text
 MARKER_RE = re.compile(
-    r'\[\[(PERSONA|VEHICLE|UBICACIO):([^\]|]+)\|([^\]|]*)\|(EXACTO|PARCIAL)\]\]'
+    r'\[\[(PERSONA|VEHICLE|UBICACIO):([^\]|]+)\|([^\]|]*)\|(EXACTO|PARCIAL|NOU)\]\]'
 )
 
 # ============================================================================
@@ -136,7 +130,7 @@ class HealthResponse(BaseModel):
 app = FastAPI(
     title="SHERLOCK API",
     description="Pipeline d'enriquiment i redacció d'informes policials",
-    version="4.0.0"
+    version="4.1.0"
 )
 
 app.add_middleware(
@@ -156,7 +150,7 @@ anthropic_client:  Optional[anthropic.Anthropic] = None
 async def startup():
     global matcher_service, annotator_service, anthropic_client
 
-    logger.info("Iniciant Sherlock v4.0...")
+    logger.info("Iniciant Sherlock v4.1...")
 
     try:
         matcher_service = MatcherService(DB_PATH)
@@ -183,7 +177,7 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     if matcher_service:
-        matcher_service.close()
+        matcher_service.close()   # FIX: mètode close() afegit al MatcherService
     logger.info("Sherlock aturat.")
 
 
@@ -207,12 +201,9 @@ async def process(request: ProcessRequest):
 
     # -------------------------------------------------------------------------
     # PAS 1+2 — Extracció per regex + contrast amb BD
-    # El regex necessita majúscules per detectar noms propis.
-    # Capitalitzem cada paraula però conservem texto_orig per al marcador i DRAG.
     # -------------------------------------------------------------------------
     from entity_extractor import extract_entities_regex
 
-    # Capitalitzar per facilitar detecció de noms propis (regex NOM_RE)
     texto_capitalizado = " ".join(
         w.capitalize() if w.isalpha() else w
         for w in texto_orig.split()
@@ -231,8 +222,9 @@ async def process(request: ProcessRequest):
     n_u = len(entitats_per_matcher["ubicaciones"])
     logger.info(f"[PAS 1] Extret: {n_v}v {n_p}p {n_u}u")
 
-    matches_result = matcher_service.contrastar_entidades(entitats_per_matcher)
-    matches_dict   = matches_to_dict(matches_result["matches"])
+    # FIX: contrastar_entidades retorna directament el dict de matches
+    # (sense clau 'matches' intermèdia que causava el KeyError)
+    matches_dict = matcher_service.contrastar_entidades(entitats_per_matcher)
 
     n_match = sum(
         1 for llista in matches_dict.values()
@@ -254,7 +246,7 @@ async def process(request: ProcessRequest):
     logger.info(f"[PAS 4] DRAG generat: {len(texto_drag)} chars")
 
     # -------------------------------------------------------------------------
-    # PAS 5 — Entitats residuals al text DRAG (les que no estaven al col·loquial)
+    # PAS 5 — Entitats residuals al text DRAG
     # -------------------------------------------------------------------------
     from entity_extractor import extract_entities_regex as eer
     entitats_drag = eer(texto_drag)
@@ -267,8 +259,8 @@ async def process(request: ProcessRequest):
     n_res = sum(len(v) for v in entitats_drag_filtrades.values())
     if n_res > 0:
         logger.info(f"[PAS 5] {n_res} entitats residuals al DRAG — contrastant amb BD")
-        matches_res = matcher_service.contrastar_entidades(entitats_drag_filtrades)
-        matches_dict = _fusionar_matches(matches_dict, matches_to_dict(matches_res["matches"]))
+        matches_res  = matcher_service.contrastar_entidades(entitats_drag_filtrades)
+        matches_dict = _fusionar_matches(matches_dict, matches_res)
 
     # -------------------------------------------------------------------------
     # PAS 6 — Anotar: llegir marcadors → text net + spans per al frontend
@@ -295,8 +287,7 @@ async def process(request: ProcessRequest):
 @app.post("/api/v1/check")
 async def check(request: CheckRequest):
     """
-    Verificació ràpida per regex.
-    Per al feedback immediat mentre l'agent escriu (sense crida a Claude ni BD).
+    Verificació ràpida per regex sense crida a Claude ni BD.
     """
     _check_matcher()
     texto = request.texto.strip()
@@ -310,8 +301,7 @@ async def check(request: CheckRequest):
         "personas":    entitats.get("persons",   []),
         "ubicaciones": entitats.get("locations", []),
     }
-    result = matcher_service.contrastar_entidades(entitats_norm)
-    return matches_to_dict(result["matches"])
+    return matcher_service.contrastar_entidades(entitats_norm)
 
 
 # ============================================================================
@@ -331,7 +321,7 @@ async def health():
 @app.get("/api/v1/stats")
 async def stats():
     return {
-        "version":   "4.0.0",
+        "version":   "4.1.0",
         "endpoints": ["/health", "/api/v1/process", "/api/v1/check"],
     }
 
@@ -358,60 +348,120 @@ def _injectar_marcadors(texto: str, matches: Dict):
     """
     Substitueix les ocurrències del text original per marcadors protegits.
 
-    Treballa de dreta a esquerra (per índex DESC) per no invalidar posicions.
+    Lògica per tipus de match:
+      EXACTO  → [[VEHICLE:9915GBN|VW Golf|EXACTO]]
+      PARCIAL → [[PERSONA:Juan Garcia|BD:JUAN GARCIA LOPEZ,JUAN GARCIA MARTINEZ|PARCIAL]]
+                (tots els candidats separats per coma al camp extra)
+      NOU     → [[PERSONA:Juan Garcia||NOU]]
+                (l'agent sap que no existeix a la BD)
 
-    Retorna (text_amb_marcadors, num_marcadors_injectats).
+    Treballa de dreta a esquerra per no invalidar posicions.
+    Per a PARCIAL: agrupa tots els candidats de la mateixa entitat en un sol marcador.
     """
     spans = []
 
+    # ---------------------------------------------------------------
+    # PERSONES — agrupa tots els PARCIAL per posició
+    # ---------------------------------------------------------------
+    # Primer construïm un dict {posició → [candidats]}
+    from collections import defaultdict
+    candidats_per_pos: Dict = defaultdict(list)
+
     for m in matches.get("personas", []):
-        if m.get("match_type") not in ("EXACTO", "PARCIAL"):
-            continue
         pos = (m.get("entidad_original") or {}).get("position")
         if not pos:
             continue
-        db  = m.get("db_record") or {}
-        nom = f"{db.get('nombre','')} {db.get('apellidos','')}".strip()
-        dni = db.get("dni", "")
-        marcador = f"[[PERSONA:{nom}|{dni}|{m['match_type']}]]"
-        spans.append({"start": pos["start"], "end": pos["end"], "marcador": marcador})
+        clau = (pos["start"], pos["end"])
+        candidats_per_pos[clau].append(m)
 
+    for (start, end), candidats in candidats_per_pos.items():
+        # Nom original extret del text
+        nom_original = candidats[0].get("texto", texto[start:end])
+
+        if all(c.get("match_type") == "SIN_COINCIDENCIA" for c in candidats):
+            # Sense cap coincidència → NOU
+            marcador = f"[[PERSONA:{nom_original}||NOU]]"
+        else:
+            # Un o més PARCIAL → llista de candidats BD al segon camp
+            candidats_bd = [
+                f"{r.get('nombre','')} {r.get('apellidos','')}".strip()
+                for c in candidats
+                if c.get("match_type") == "PARCIAL"
+                for r in [c.get("db_record") or {}]
+                if r.get("nombre")
+            ]
+            extra    = ",".join(candidats_bd) if candidats_bd else ""
+            marcador = f"[[PERSONA:{nom_original}|{extra}|PARCIAL]]"
+
+        spans.append({"start": start, "end": end, "marcador": marcador})
+
+    # ---------------------------------------------------------------
+    # VEHICLES
+    # ---------------------------------------------------------------
     for m in matches.get("vehiculos", []):
         if m.get("match_type") not in ("EXACTO", "PARCIAL"):
+            # SIN_COINCIDENCIA — marcar com NOU igualment
+            pos = (m.get("entidad_original") or {}).get("position")
+            if pos:
+                nom = m.get("texto", texto[pos["start"]:pos["end"]])
+                spans.append({
+                    "start":    pos["start"],
+                    "end":      pos["end"],
+                    "marcador": f"[[VEHICLE:{nom}||NOU]]"
+                })
             continue
+
         pos = (m.get("entidad_original") or {}).get("position")
         if not pos:
             continue
         db    = m.get("db_record") or {}
-        plate = db.get("plate", (m.get("entidad_original") or {}).get("matricula", ""))
+        plate = db.get("plate", m.get("texto", ""))
         info  = f"{db.get('brand','')} {db.get('model','')}".strip()
         marcador = f"[[VEHICLE:{plate}|{info}|{m['match_type']}]]"
         spans.append({"start": pos["start"], "end": pos["end"], "marcador": marcador})
 
+    # ---------------------------------------------------------------
+    # UBICACIONS
+    # ---------------------------------------------------------------
     for m in matches.get("ubicaciones", []):
-        if m.get("match_type") not in ("EXACTO", "PARCIAL"):
-            continue
         pos = (m.get("entidad_original") or {}).get("position")
         if not pos:
             continue
-        db        = m.get("db_record") or {}
-        canonical = db.get("canonical_name", (m.get("entidad_original") or {}).get("texto_completo", ""))
-        marcador  = f"[[UBICACIO:{canonical}||{m['match_type']}]]"
+
+        if m.get("match_type") == "SIN_COINCIDENCIA":
+            nom      = m.get("texto", texto[pos["start"]:pos["end"]])
+            marcador = f"[[UBICACIO:{nom}||NOU]]"
+        else:
+            db        = m.get("db_record") or {}
+            canonical = db.get("canonical_name", m.get("texto", ""))
+            marcador  = f"[[UBICACIO:{canonical}||{m['match_type']}]]"
+
         spans.append({"start": pos["start"], "end": pos["end"], "marcador": marcador})
 
-    # Substituir de dreta a esquerra
-    spans.sort(key=lambda s: s["start"], reverse=True)
-    text = texto
+    # ---------------------------------------------------------------
+    # Substituir de dreta a esquerra (no invalida posicions)
+    # ---------------------------------------------------------------
+    # Eliminar duplicats de posició (en cas de múltiples PARCIAL per la mateixa posició)
+    posicions_vistes = set()
+    spans_unics = []
     for s in spans:
+        clau = (s["start"], s["end"])
+        if clau not in posicions_vistes:
+            posicions_vistes.add(clau)
+            spans_unics.append(s)
+
+    spans_unics.sort(key=lambda s: s["start"], reverse=True)
+    text = texto
+    for s in spans_unics:
         text = text[:s["start"]] + s["marcador"] + text[s["end"]:]
 
-    return text, len(spans)
+    return text, len(spans_unics)
 
 
 async def _redactar_drag(texto_marcat: str, mode: str) -> str:
     """
-    Crida Claude (Bitàcola) per redactar el text DRAG.
-    El prompt (redactor_system.txt) li indica que respecti els marcadors [[...]].
+    Crida Claude per redactar el text DRAG.
+    El prompt indica que respecti els marcadors [[...]].
     """
     prompt_path = BASE_DIR / "redactor_system.txt"
     if not prompt_path.exists():
@@ -434,19 +484,21 @@ async def _redactar_drag(texto_marcat: str, mode: str) -> str:
 
 def _filtrar_ja_marcades(entitats: Dict, texto_drag: str) -> Dict:
     """
-    Elimina de la llista d'entitats les que ja estan marcades al text DRAG.
-    Preveu doble anotació.
+    Elimina entitats que ja estan marcades al text DRAG.
+    Prevé doble anotació.
     """
     marcats = set()
     for _, dades, extra, _ in MARKER_RE.findall(texto_drag):
         marcats.add(dades.upper())
         if extra:
-            marcats.add(extra.upper())
+            for e in extra.split(","):
+                marcats.add(e.strip().upper())
 
     def no_marcat(e: Dict) -> bool:
-        mat = e.get("matricula", "").upper()
-        dni = e.get("dni", "").upper()
-        return mat not in marcats and dni not in marcats
+        mat = (e.get("matricula") or e.get("plate") or "").upper()
+        dni = (e.get("dni") or "").upper()
+        nom = f"{e.get('nombre','')} {e.get('apellidos','')}".strip().upper()
+        return mat not in marcats and dni not in marcats and nom not in marcats
 
     return {
         "vehiculos":   [e for e in entitats.get("vehiculos",   []) if no_marcat(e)],
